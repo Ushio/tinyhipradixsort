@@ -1,7 +1,25 @@
 #include "shader.hpp"
 
 #include <stdint.h>
+#include <memory>
+#include "Orochi/OrochiUtils.h"
 
+class Stopwatch
+{
+public:
+	using clock = std::chrono::high_resolution_clock;
+	Stopwatch() : _started( clock::now() ) {}
+
+	// seconds
+	double elapsed() const
+	{
+		auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>( clock::now() - _started ).count();
+		return (double)microseconds * 0.001 * 0.001;
+	}
+
+private:
+	clock::time_point _started;
+};
 struct splitmix64
 {
 	uint64_t x = 0; /* The state can be seeded with any value. */
@@ -29,7 +47,7 @@ int main()
 		printf( "failed to init..\n" );
 		return 0;
 	}
-	int deviceIdx = 2;
+	int deviceIdx = 0;
 
 	oroError err;
 	err = oroInit( 0 );
@@ -53,18 +71,15 @@ int main()
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 
-		std::vector<uint64_t> inputs( 1024 * 2 );
+		std::vector<uint64_t> inputs( 1024 * 1024 * 16 );
 
 		splitmix64 rng;
-		for( int i = 0; i < inputs.size(); i++ )
-		{
-			inputs[i] = rng.next();
-		}
 
 		uint64_t numberOfInputs = inputs.size();
 		uint64_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 
-		Buffer inputsBuffer( sizeof( uint64_t ) * inputs.size() );
+		std::unique_ptr<Buffer> inputsBuffer( new Buffer( sizeof( uint64_t ) * inputs.size() ) );
+		std::unique_ptr<Buffer> outputsBuffer( new Buffer( sizeof( uint64_t ) * inputs.size() ) );
 
 		// column major
 		// +---- buckets ( 256 ) ----
@@ -75,37 +90,77 @@ int main()
 		Buffer prefixSumIteratorBuffer( sizeof( uint32_t ) );
 		Buffer globalPrefixBuffer( sizeof( uint32_t ) );
 
-		oroMemcpyHtoDAsync( (oroDeviceptr)inputsBuffer.data(), inputs.data(), sizeof( uint64_t ) * inputs.size(), stream );
-		oroMemsetD32Async( (oroDeviceptr)prefixSumIteratorBuffer.data(), 0, 1, stream );
-		oroMemsetD32Async( (oroDeviceptr)globalPrefixBuffer.data(), 0, 1, stream );
-
-		oroStreamSynchronize( stream );
-
+		for (;;)
 		{
-			ShaderArgument args;
-			args.add( inputsBuffer.data() );
-			args.add( numberOfInputs );
-			args.add( counterBuffer.data() );
-			args.add( 0 );
-			shader.launch( "blockCount", args, numberOfBlocks, 1, 1, RADIX_SORT_BLOCK_SIZE, 1, 1, stream );
+			for( int i = 0; i < inputs.size(); i++ )
+			{
+				inputs[i] = rng.next() & 0xFFFFFFFF;
+			}
+
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputsBuffer->data(), inputs.data(), sizeof( uint64_t ) * inputs.size(), stream );
+
+			OroStopwatch oroStream( stream );
+			oroStream.start();
+			for (int i = 0; i < 4; i++)
+			{
+				uint32_t bitLocation = i * 8;
+
+				oroMemsetD32Async( (oroDeviceptr)prefixSumIteratorBuffer.data(), 0, 1, stream );
+				oroMemsetD32Async( (oroDeviceptr)globalPrefixBuffer.data(), 0, 1, stream );
+				oroStreamSynchronize( stream );
+				// counter
+				{
+					ShaderArgument args;
+					args.add( inputsBuffer->data() );
+					args.add( numberOfInputs );
+					args.add( counterBuffer.data() );
+					args.add( bitLocation );
+					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, RADIX_SORT_BLOCK_SIZE, 1, 1, stream );
+				}
+				// Prefix Sum 
+				{
+					ShaderArgument args;
+					args.add( counterBuffer.data() );
+					args.add( numberOfBlocks * 256 );
+					args.add( counterPrefixSumBuffer.data() );
+					args.add( prefixSumIteratorBuffer.data() );
+					args.add( globalPrefixBuffer.data() );
+					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
+					shader.launch( "prefixSumExclusive", args, numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK, 1, 1, 32, 1, 1, stream );
+				}
+				// reorder
+				{
+					ShaderArgument args;
+					args.add( inputsBuffer->data() );
+					args.add( outputsBuffer->data() );
+					args.add( numberOfInputs );
+					args.add( counterPrefixSumBuffer.data() );
+					args.add( bitLocation );
+					shader.launch( "reorder", args, div_round_up( numberOfBlocks, 32 ), 1, 1, 32, 1, 1, stream );
+				}
+
+				std::swap( inputsBuffer, outputsBuffer );
+			}
+
+			oroStream.stop();
+			float ms = oroStream.getMs();
+			oroStreamSynchronize( stream );
+
+			printf( "%f ms\n", ms );
+
+			std::vector<uint64_t> outputs( inputs.size() );
+			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)inputsBuffer->data(), sizeof( uint64_t ) * numberOfInputs );
+
+			for (int i = 0; i < outputs.size() - 1; i++)
+			{
+				SH_ASSERT( outputs[i] <= outputs[i + 1] );
+			}
+
+			//Stopwatch sw;
+			//std::sort( inputs.begin(), inputs.end() );
+			//printf( "cpu %f ms,  %lld\n", sw.elapsed() * 1000.0, inputs[0] );
 		}
-
-		// Prefix Sum 
-		{
-			ShaderArgument args;
-			args.add( counterBuffer.data() );
-			args.add( numberOfBlocks * 256 );
-			args.add( counterPrefixSumBuffer.data() );
-			args.add( prefixSumIteratorBuffer.data() );
-			args.add( globalPrefixBuffer.data() );
-			// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
-			shader.launch( "prefixSumExclusive", args, numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK, 1, 1, 32, 1, 1, stream );
-		}
-
-		oroStreamSynchronize( stream );
-
-
-
+		
 		//std::vector<uint32_t> counterBufferRef( 256 * numberOfBlocks );
 		//for( int i = 0; i < inputs.size(); i += RADIX_SORT_BLOCK_SIZE )
 		//{
@@ -122,19 +177,19 @@ int main()
 		//	}
 		//}
 
-		std::vector<uint32_t> counterBufferFromGPU( 256 * numberOfBlocks );
-		oroMemcpyDtoH( counterBufferFromGPU.data(), (oroDeviceptr)counterBuffer.data(), sizeof( uint32_t ) * 256 * numberOfBlocks );
+		//std::vector<uint32_t> counterBufferFromGPU( 256 * numberOfBlocks );
+		//oroMemcpyDtoH( counterBufferFromGPU.data(), (oroDeviceptr)counterBuffer.data(), sizeof( uint32_t ) * 256 * numberOfBlocks );
 
-		//for (int i = 0; i < counterBufferRef.size(); i++)
-		//{
-		//	SH_ASSERT( counterBufferRef[i] == counterBufferFromGPU[i] );
-		//}
+		////for (int i = 0; i < counterBufferRef.size(); i++)
+		////{
+		////	SH_ASSERT( counterBufferRef[i] == counterBufferFromGPU[i] );
+		////}
 
 
-		std::vector<uint32_t> counterPrefixSumBufferFromGPU( 256 * numberOfBlocks );
-		oroMemcpyDtoH( counterPrefixSumBufferFromGPU.data(), (oroDeviceptr)counterPrefixSumBuffer.data(), sizeof( uint32_t ) * 256 * numberOfBlocks );
+		//std::vector<uint32_t> counterPrefixSumBufferFromGPU( 256 * numberOfBlocks );
+		//oroMemcpyDtoH( counterPrefixSumBufferFromGPU.data(), (oroDeviceptr)counterPrefixSumBuffer.data(), sizeof( uint32_t ) * 256 * numberOfBlocks );
 
-		printf( "counterPrefixSumBufferFromGPU" );
+		//printf( "counterPrefixSumBufferFromGPU" );
 	}
 
 	oroCtxDestroy( ctx );

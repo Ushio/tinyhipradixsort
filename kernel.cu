@@ -6,6 +6,10 @@ typedef unsigned char uint8_t;
 #define RADIX_SORT_BLOCK_SIZE 1024
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 256
 
+#if defined( CUDART_VERSION ) && CUDART_VERSION >= 9000
+	#define ITS 1
+#endif
+
 __device__ inline int div_round_up( int val, int divisor )
 {
 	return ( val + divisor - 1 ) / divisor;
@@ -47,32 +51,30 @@ __device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum
 
 	for( uint32_t offset = 1; offset < 32; offset <<= 1 )
 	{
+#if defined( ITS )
 		__syncwarp( 0xffffffff );
 		uint32_t y = __shfl_up_sync( 0xffffffff, x, offset );
+#else
+		uint32_t y = __shfl_up( x, offset );
+#endif
 
 		if( offset <= threadIdx.x )
 		{
 			x += y;
 		}
 	}
-
+#if defined( ITS )
 	__syncwarp( 0xffffffff );
 	*sum = __shfl_sync( 0xffffffff, x, 31 );
+#else
+	*sum = __shfl( x, 31 );
+#endif
 	*p = x - val;
 }
 
 
 extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t* iterator, uint32_t* globalPrefix )
 {
-	//uint32_t r;
-	//uint32_t s;
-	//warpPrefixSumExclusive( 1, &r, &s );
-	//printf( "[%d] %d %d\n", threadIdx.x, r, s );
-
-	//assert( 0 );
-	// printf( "%d %d\n", threadIdx.x, __shfl_up_sync( 0xffffffff, threadIdx.x, 1 ) );
-	// printf( "%d %d\n", threadIdx.x, warpPrefixSum( 2 ) );
-
 	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
 
 	int blockIndex = blockIdx.x;
@@ -101,9 +103,13 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 
 		atomicInc( iterator, 0xFFFFFFFF );
 	}
-
+#if defined( ITS )
 	__syncwarp( 0xffffffff );
 	gp = __shfl_sync( 0xffffffff, gp, 0 );
+#else
+	__syncthreads();
+	gp = __shfl( gp, 0 );
+#endif
 
 	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += 32 )
 	{
@@ -112,3 +118,24 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 	}
 }
 
+extern "C" __global__ void reorder( uint64_t* inputs, uint64_t* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+{
+	// Maybe we can break prefix sum idx. 
+	int blockIndex = threadIdx.x + blockDim.x * blockIdx.x;
+	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+	if( numberOfBlocks <= blockIndex )
+	{
+		return;
+	}
+
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
+	{
+		int itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i;
+		uint64_t item = inputs[itemIndex];
+		uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+
+		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
+		uint32_t location = sums[counterIndex]++;
+		outputs[location] = item;
+	}
+}
