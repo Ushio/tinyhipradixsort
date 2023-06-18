@@ -1,0 +1,3 @@
+[submodule "libs/Orochi"]
+	path = libs/Orochi
+	url = https://github.com/amdadvtech/Orochi
