@@ -38,7 +38,7 @@ inline int div_round_up( int val, int divisor )
 }
 
 #define RADIX_SORT_BLOCK_SIZE 1024
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 256
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
 int main()
 {
@@ -119,8 +119,8 @@ int main()
 				}
 				// Prefix Sum 
 				{
-					OroStopwatch oroStream( stream );
-					oroStream.start();
+					//OroStopwatch oroStream( stream );
+					//oroStream.start();
 
 					ShaderArgument args;
 					args.add( counterBuffer.data() );
@@ -129,14 +129,15 @@ int main()
 					args.add( prefixSumIteratorBuffer.data() );
 					args.add( globalPrefixBuffer.data() );
 					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
+					// printf( " prefixSumExclusive %d\n", numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK );
 					shader.launch( "prefixSumExclusive", args, numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK, 1, 1, 32, 1, 1, stream );
 				
 				
-					oroStream.stop();
-					float ms = oroStream.getMs();
-					oroStreamSynchronize( stream );
+					//oroStream.stop();
+					//float ms = oroStream.getMs();
+					//oroStreamSynchronize( stream );
 
-					printf( "pSum %f ms\n", ms );
+					//printf( "pSum %f ms\n", ms );
 				}
 				// reorder
 				{

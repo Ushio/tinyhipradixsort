@@ -4,7 +4,9 @@ typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
 #define RADIX_SORT_BLOCK_SIZE 1024
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 256
+
+// TODO out of range handling
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
 #if defined( CUDART_VERSION ) && CUDART_VERSION >= 9000
 	#define ITS 1
@@ -84,7 +86,7 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 		int itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
 		uint32_t p;
 		uint32_t s;
-		warpPrefixSumExclusive( inputs[itemIndex], &p, &s );
+		warpPrefixSumExclusive( itemIndex < numberOfInputs ? inputs[itemIndex] : 0, &p, &s );
 		localPrefixSum[i + threadIdx.x] = prefix + p;
 		prefix += s;
 	}
@@ -114,7 +116,10 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += 32 )
 	{
 		int itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
-		sums[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
+		if (itemIndex < numberOfInputs)
+		{
+			sums[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
+		}
 	}
 }
 
