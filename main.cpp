@@ -47,7 +47,7 @@ int main()
 		printf( "failed to init..\n" );
 		return 0;
 	}
-	int deviceIdx = 0;
+	int deviceIdx = 2;
 
 	oroError err;
 	err = oroInit( 0 );
@@ -107,7 +107,7 @@ int main()
 
 				oroMemsetD32Async( (oroDeviceptr)prefixSumIteratorBuffer.data(), 0, 1, stream );
 				oroMemsetD32Async( (oroDeviceptr)globalPrefixBuffer.data(), 0, 1, stream );
-				oroStreamSynchronize( stream );
+
 				// counter
 				{
 					ShaderArgument args;
@@ -119,6 +119,9 @@ int main()
 				}
 				// Prefix Sum 
 				{
+					OroStopwatch oroStream( stream );
+					oroStream.start();
+
 					ShaderArgument args;
 					args.add( counterBuffer.data() );
 					args.add( numberOfBlocks * 256 );
@@ -127,6 +130,13 @@ int main()
 					args.add( globalPrefixBuffer.data() );
 					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
 					shader.launch( "prefixSumExclusive", args, numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK, 1, 1, 32, 1, 1, stream );
+				
+				
+					oroStream.stop();
+					float ms = oroStream.getMs();
+					oroStreamSynchronize( stream );
+
+					printf( "pSum %f ms\n", ms );
 				}
 				// reorder
 				{
