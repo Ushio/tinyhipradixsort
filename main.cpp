@@ -39,6 +39,8 @@ inline int div_round_up( int val, int divisor )
 
 #define RADIX_SORT_BLOCK_SIZE 1024
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
+//#define RADIX_SORT_TYPE uint64_t
+#define RADIX_SORT_TYPE uint32_t
 
 int main()
 {
@@ -71,15 +73,15 @@ int main()
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 
-		std::vector<uint64_t> inputs( 1024 * 1024 * 128 + 11 );
+		std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 
 		splitmix64 rng;
 
 		uint64_t numberOfInputs = inputs.size();
 		uint64_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 
-		std::unique_ptr<Buffer> inputsBuffer( new Buffer( sizeof( uint64_t ) * inputs.size() ) );
-		std::unique_ptr<Buffer> outputsBuffer( new Buffer( sizeof( uint64_t ) * inputs.size() ) );
+		std::unique_ptr<Buffer> inputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
+		std::unique_ptr<Buffer> outputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
 
 		// column major
 		// +---- buckets ( 256 ) ----
@@ -97,7 +99,7 @@ int main()
 				inputs[i] = rng.next() & 0xFFFFFFFF;
 			}
 
-			oroMemcpyHtoDAsync( (oroDeviceptr)inputsBuffer->data(), inputs.data(), sizeof( uint64_t ) * inputs.size(), stream );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputsBuffer->data(), inputs.data(), sizeof( RADIX_SORT_TYPE ) * inputs.size(), stream );
 
 			OroStopwatch oroStream( stream );
 			oroStream.start();
@@ -158,8 +160,8 @@ int main()
 
 			printf( "%f ms\n", ms );
 
-			std::vector<uint64_t> outputs( inputs.size() );
-			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)inputsBuffer->data(), sizeof( uint64_t ) * numberOfInputs );
+			std::vector<RADIX_SORT_TYPE> outputs( inputs.size() );
+			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)inputsBuffer->data(), sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
 
 			for (int i = 0; i < outputs.size() - 1; i++)
 			{

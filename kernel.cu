@@ -8,6 +8,9 @@ typedef unsigned char uint8_t;
 // TODO out of range handling
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
+//#define RADIX_SORT_TYPE uint64_t
+#define RADIX_SORT_TYPE uint32_t
+
 #if defined( CUDART_VERSION ) && CUDART_VERSION >= 9000
 	#define ITS 1
 #endif
@@ -17,7 +20,7 @@ __device__ inline int div_round_up( int val, int divisor )
 	return ( val + divisor - 1 ) / divisor;
 }
 
-extern "C" __global__ void blockCount( uint64_t* inputs, uint64_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
+extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
 	if( threadIdx.x < 256 )
@@ -29,7 +32,7 @@ extern "C" __global__ void blockCount( uint64_t* inputs, uint64_t numberOfInputs
 	uint64_t itemIndex = blockIdx.x * blockDim.x + threadIdx.x;
 	if( itemIndex < numberOfInputs )
 	{
-		uint64_t item = inputs[itemIndex];
+		auto item = inputs[itemIndex];
 		uint32_t bits = ( item >> bitLocation ) & 0xFF;
 		atomicInc( &localCounters[bits], 0xFFFFFFFF );
 	}
@@ -123,7 +126,7 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 	}
 }
 
-extern "C" __global__ void reorder( uint64_t* inputs, uint64_t* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
 	// Maybe we can break prefix sum idx. 
 	int blockIndex = threadIdx.x + blockDim.x * blockIdx.x;
@@ -136,7 +139,7 @@ extern "C" __global__ void reorder( uint64_t* inputs, uint64_t* outputs, uint64_
 	//	{
 	//		break;
 	//	}
-	//	uint64_t item = inputs[itemIndex];
+	//	auto item = inputs[itemIndex];
 	//	uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 
 	//	uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
@@ -148,7 +151,7 @@ extern "C" __global__ void reorder( uint64_t* inputs, uint64_t* outputs, uint64_
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += N_BATCH )
 	{
-		uint64_t items[N_BATCH];
+		RADIX_SORT_TYPE items[N_BATCH];
 		for( int j = 0; j < N_BATCH; j++ )
 		{
 			uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + j;
