@@ -135,7 +135,11 @@ extern "C" __global__ void reorder( uint64_t* inputs, uint64_t* outputs, uint64_
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
 	{
-		int itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i;
+		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i;
+		if( numberOfInputs <= itemIndex )
+		{
+			break;
+		}
 		uint64_t item = inputs[itemIndex];
 		uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 

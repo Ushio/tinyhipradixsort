@@ -71,7 +71,7 @@ int main()
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 
-		std::vector<uint64_t> inputs( 1024 * 1024 * 16 );
+		std::vector<uint64_t> inputs( 1024 * 1024 * 128 + 11 );
 
 		splitmix64 rng;
 
@@ -130,9 +130,8 @@ int main()
 					args.add( globalPrefixBuffer.data() );
 					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
 					// printf( " prefixSumExclusive %d\n", numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK );
-					shader.launch( "prefixSumExclusive", args, numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK, 1, 1, 32, 1, 1, stream );
-				
-				
+					shader.launch( "prefixSumExclusive", args, div_round_up( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, 32, 1, 1, stream );
+					
 					//oroStream.stop();
 					//float ms = oroStream.getMs();
 					//oroStreamSynchronize( stream );
