@@ -128,23 +128,49 @@ extern "C" __global__ void reorder( uint64_t* inputs, uint64_t* outputs, uint64_
 	// Maybe we can break prefix sum idx. 
 	int blockIndex = threadIdx.x + blockDim.x * blockIdx.x;
 	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-	if( numberOfBlocks <= blockIndex )
-	{
-		return;
-	}
 
-	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
+	//for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
+	//{
+	//	uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i;
+	//	if( numberOfInputs <= itemIndex )
+	//	{
+	//		break;
+	//	}
+	//	uint64_t item = inputs[itemIndex];
+	//	uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+
+	//	uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
+	//	uint32_t location = sums[counterIndex]++;
+	//	outputs[location] = item;
+	//}
+
+	#define N_BATCH 16
+
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += N_BATCH )
 	{
-		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i;
-		if( numberOfInputs <= itemIndex )
+		uint64_t items[N_BATCH];
+		for( int j = 0; j < N_BATCH; j++ )
 		{
-			break;
+			uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + j;
+			if( numberOfInputs <= itemIndex )
+			{
+				break;
+			}
+			items[j] = inputs[itemIndex];
 		}
-		uint64_t item = inputs[itemIndex];
-		uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 
-		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
-		uint32_t location = sums[counterIndex]++;
-		outputs[location] = item;
+		for (int j = 0; j < N_BATCH; j++)
+		{
+			uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + j;
+			if( numberOfInputs <= itemIndex )
+			{
+				break;
+			}
+
+			uint32_t bucketIndex = ( items[j] >> bitLocation ) & 0xFF;
+			uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
+			uint32_t location = sums[counterIndex]++;
+			outputs[location] = items[j];
+		}
 	}
 }
