@@ -3,7 +3,7 @@ typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
-#define RADIX_SORT_BLOCK_SIZE 1024
+#define RADIX_SORT_BLOCK_SIZE 4096
 
 // TODO out of range handling
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
@@ -29,12 +29,15 @@ extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberO
 	}
 	__syncthreads();
 
-	uint64_t itemIndex = blockIdx.x * blockDim.x + threadIdx.x;
-	if( itemIndex < numberOfInputs )
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 1024 )
 	{
-		auto item = inputs[itemIndex];
-		uint32_t bits = ( item >> bitLocation ) & 0xFF;
-		atomicInc( &localCounters[bits], 0xFFFFFFFF );
+		uint64_t itemIndex = blockIdx.x * RADIX_SORT_BLOCK_SIZE + threadIdx.x + i;
+		if( itemIndex < numberOfInputs )
+		{
+			auto item = inputs[itemIndex];
+			uint32_t bits = ( item >> bitLocation ) & 0xFF;
+			atomicInc( &localCounters[bits], 0xFFFFFFFF );
+		}
 	}
 
 	__syncthreads();
@@ -102,12 +105,52 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 
 		__threadfence();
 
-		gp = atomicAdd( globalPrefix, prefix );
+		gp = *globalPrefix;
+		*globalPrefix += prefix;
 
 		__threadfence();
 
 		atomicInc( iterator, 0xFFFFFFFF );
 	}
+
+	//  64bit it = ( counter )( offset ) 
+	//int gp;
+	//if( threadIdx.x == 0 )
+	//{
+	//	uint64_t old = counter[0];
+	//	uint64_t expected;
+	//	do
+	//	{
+	//		uint32_t previous = old & 0xFFFFFFFF;
+	//		expected = previous + ( (uint64_t)( blockIndex ) << 32 );
+	//		uint64_t newValue = previous + prefix + ( (uint64_t)( blockIndex + 1 ) << 32 );
+	//		old = atomicCAS( iterator, expected, newValue );
+	//	} while( old != expected );
+	//	gp = old & 0xFFFFFFFF;
+	//}
+
+	//int gp;
+	//if( threadIdx.x == 0 )
+	//{
+	//	struct Context
+	//	{
+	//		uint64_t prefix : 32;
+	//		uint64_t iterator : 32;
+	//	};
+	//	Context old = *(Context*)iterator;
+	//	Context expected;
+	//	do
+	//	{
+	//		expected.prefix = old.prefix;
+	//		expected.iterator = blockIndex;
+	//		Context newValue;
+	//		newValue.prefix = old.prefix + prefix;
+	//		newValue.iterator = blockIndex + 1;
+	//		old = atomicCAS( iterator, expected, &newValue );
+	//	} while( old != expected );
+	//	gp = old & 0xFFFFFFFF;
+	//}
+
 #if defined( ITS )
 	__syncwarp( 0xffffffff );
 	gp = __shfl_sync( 0xffffffff, gp, 0 );

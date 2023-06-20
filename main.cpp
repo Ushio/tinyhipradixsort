@@ -37,10 +37,13 @@ inline int div_round_up( int val, int divisor )
 	return ( val + divisor - 1 ) / divisor;
 }
 
-#define RADIX_SORT_BLOCK_SIZE 1024
+#define RADIX_SORT_BLOCK_SIZE 4096
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 //#define RADIX_SORT_TYPE uint64_t
 #define RADIX_SORT_TYPE uint32_t
+
+static_assert( 1024 < RADIX_SORT_BLOCK_SIZE, "" );
+static_assert( ( RADIX_SORT_BLOCK_SIZE % 1024 ) == 0, "" );
 
 int main()
 {
@@ -73,7 +76,8 @@ int main()
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 
-		std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
+		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
+		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 
 		splitmix64 rng;
 
@@ -89,7 +93,7 @@ int main()
 		// blocks
 		Buffer counterBuffer( sizeof( uint32_t ) * 256 * numberOfBlocks );
 		Buffer counterPrefixSumBuffer( sizeof( uint32_t ) * 256 * numberOfBlocks );
-		Buffer prefixSumIteratorBuffer( sizeof( uint32_t ) );
+		Buffer prefixSumIteratorBuffer( sizeof( uint32_t ) * 2 );
 		Buffer globalPrefixBuffer( sizeof( uint32_t ) );
 
 		for (;;)
@@ -107,7 +111,7 @@ int main()
 			{
 				uint32_t bitLocation = i * 8;
 
-				oroMemsetD32Async( (oroDeviceptr)prefixSumIteratorBuffer.data(), 0, 1, stream );
+				oroMemsetD32Async( (oroDeviceptr)prefixSumIteratorBuffer.data(), 0, prefixSumIteratorBuffer.bytes() / 4, stream );
 				oroMemsetD32Async( (oroDeviceptr)globalPrefixBuffer.data(), 0, 1, stream );
 
 				// counter
@@ -117,7 +121,7 @@ int main()
 					args.add( numberOfInputs );
 					args.add( counterBuffer.data() );
 					args.add( bitLocation );
-					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, RADIX_SORT_BLOCK_SIZE, 1, 1, stream );
+					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, 1024, 1, 1, stream );
 				}
 				// Prefix Sum 
 				{
