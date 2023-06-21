@@ -171,33 +171,134 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 
 extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
-	// Maybe we can break prefix sum idx. 
-	int blockIndex = threadIdx.x + blockDim.x * blockIdx.x;
+	__shared__ uint32_t psum[256];
+
+	int blockIndex = blockIdx.x;
 	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-
-	__shared__ uint32_t psum[32][256];
-
-	for( int i = 0; i < 256; i++ )
+	for( int i = 0; i < 256; i += 32 )
 	{
-		uint32_t counterIndex = i /* bucketIndex */ * numberOfBlocks + blockIndex;
-		psum[threadIdx.x][i] = sums[counterIndex];
+		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
+		psum[i + threadIdx.x] = sums[counterIndex];
 	}
+	__syncthreads();
 
-	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
+#if 1
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
-		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i;
-		if( numberOfInputs <= itemIndex )
+		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		RADIX_SORT_TYPE item;
+		uint32_t bucketIndex;
+		if( itemIndex < numberOfInputs )
 		{
-			break;
+			item = inputs[itemIndex];
+			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
-		auto item = inputs[itemIndex];
-		uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 
-		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
-		// uint32_t location = sums[counterIndex]++;
-		uint32_t location = psum[threadIdx.x][bucketIndex]++;
-		outputs[location] = item;
+		uint32_t location = -1;
+		for( int j = 0; j < 32; j++ )
+		{
+			if( j == threadIdx.x )
+			{
+				if( itemIndex < numberOfInputs )
+				{
+					location = psum[bucketIndex]++;
+				}
+			}
+			__syncthreads();
+		}
+		if( location != -1 )
+		{
+			outputs[location] = item;
+		}
 	}
+#else
+#define N_BATCH 8
+
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 * N_BATCH )
+	{
+		RADIX_SORT_TYPE items[N_BATCH];
+		uint32_t bucketIndices[N_BATCH];
+
+		for( int k = 0; k < N_BATCH; k++ )
+		{
+			uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + ( threadIdx.x ) * N_BATCH + k;
+
+			if( itemIndex < numberOfInputs )
+			{
+				items[k] = inputs[itemIndex];
+				bucketIndices[k] = ( items[k] >> bitLocation ) & 0xFF;
+			}
+			else
+			{
+				bucketIndices[k] = -1;
+			}
+		}
+
+		for( int j = 0; j < 32; j++ )
+		{
+			if( j == threadIdx.x )
+			{
+				for( int k = 0; k < N_BATCH; k++ )
+				{
+					if (bucketIndices[k] != -1)
+					{
+						uint32_t location = psum[bucketIndices[k]]++;
+						outputs[location] = items[k];
+					}
+				}
+			}
+			__syncthreads();
+		}
+	}
+#endif
+
+	//for (;;)
+	//{
+	//	uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + item;
+	//	if( itemIndex < numberOfInputs )
+	//	{
+	//		auto item = inputs[itemIndex];
+	//		uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+	//		if( atomicAdd( &counters[bucketIndex] ) == 0 )
+	//		{
+	//			psum[bucketIndex]++;
+	//			outputs[location] = item;
+	//		}
+	//		else
+	//		{
+
+	//		}
+	//	}
+	//}
+
+	// Maybe we can break prefix sum idx. 
+
+	//int blockIndex = threadIdx.x + blockDim.x * blockIdx.x;
+	//int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+
+	//__shared__ uint32_t psum[32][256];
+
+	//for( int i = 0; i < 256; i++ )
+	//{
+	//	uint32_t counterIndex = i /* bucketIndex */ * numberOfBlocks + blockIndex;
+	//	psum[threadIdx.x][i] = sums[counterIndex];
+	//}
+
+	//for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
+	//{
+	//	uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i;
+	//	if( numberOfInputs <= itemIndex )
+	//	{
+	//		break;
+	//	}
+	//	auto item = inputs[itemIndex];
+	//	uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+
+	//	uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
+	//	// uint32_t location = sums[counterIndex]++;
+	//	uint32_t location = psum[threadIdx.x][bucketIndex]++;
+	//	outputs[location] = item;
+	//}
 
 	//#define N_BATCH 8
 

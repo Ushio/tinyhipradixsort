@@ -146,13 +146,24 @@ int main()
 				}
 				// reorder
 				{
+					OroStopwatch oroStream( stream );
+					oroStream.start();
+
 					ShaderArgument args;
 					args.add( inputsBuffer->data() );
 					args.add( outputsBuffer->data() );
 					args.add( numberOfInputs );
 					args.add( counterPrefixSumBuffer.data() );
 					args.add( bitLocation );
-					shader.launch( "reorder", args, div_round_up( numberOfBlocks, 32 ), 1, 1, 32, 1, 1, stream );
+					// shader.launch( "reorder", args, div_round_up( numberOfBlocks, 32 ), 1, 1, 32, 1, 1, stream );
+
+					shader.launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
+				
+					oroStream.stop();
+					float ms = oroStream.getMs();
+					oroStreamSynchronize( stream );
+
+					printf( "reorder %f ms\n", ms );
 				}
 
 				std::swap( inputsBuffer, outputsBuffer );
