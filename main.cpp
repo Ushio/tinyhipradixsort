@@ -36,14 +36,13 @@ inline int div_round_up( int val, int divisor )
 {
 	return ( val + divisor - 1 ) / divisor;
 }
-
-#define RADIX_SORT_BLOCK_SIZE 4096
+#define RADIX_SORT_BLOCK_SIZE 1024
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 //#define RADIX_SORT_TYPE uint64_t
 #define RADIX_SORT_TYPE uint32_t
 
-static_assert( 1024 < RADIX_SORT_BLOCK_SIZE, "" );
-static_assert( ( RADIX_SORT_BLOCK_SIZE % 1024 ) == 0, "" );
+static_assert( 32 <= RADIX_SORT_BLOCK_SIZE, "" );
+static_assert( ( RADIX_SORT_BLOCK_SIZE % 32 ) == 0, "" );
 
 int main()
 {
@@ -52,7 +51,7 @@ int main()
 		printf( "failed to init..\n" );
 		return 0;
 	}
-	int deviceIdx = 2;
+	int deviceIdx = 0;
 
 	oroError err;
 	err = oroInit( 0 );
@@ -75,7 +74,7 @@ int main()
 	{
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
-
+		// std::vector<RADIX_SORT_TYPE> inputs( 1024  * 16 );
 		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 
@@ -121,7 +120,7 @@ int main()
 					args.add( numberOfInputs );
 					args.add( counterBuffer.data() );
 					args.add( bitLocation );
-					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, 1024, 1, 1, stream );
+					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
 				}
 				// Prefix Sum 
 				{
@@ -182,10 +181,13 @@ int main()
 			{
 				SH_ASSERT( outputs[i] <= outputs[i + 1] );
 			}
-
 			//Stopwatch sw;
 			//std::sort( inputs.begin(), inputs.end() );
 			//printf( "cpu %f ms,  %lld\n", sw.elapsed() * 1000.0, inputs[0] );
+			//for( int i = 0; i < outputs.size(); i++ )
+			//{
+			//	SH_ASSERT( outputs[i] == inputs[i] );
+			//}
 		}
 		
 		//std::vector<uint32_t> counterBufferRef( 256 * numberOfBlocks );

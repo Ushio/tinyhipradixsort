@@ -3,7 +3,7 @@ typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
-#define RADIX_SORT_BLOCK_SIZE 4096
+#define RADIX_SORT_BLOCK_SIZE 1024
 
 // TODO out of range handling
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
@@ -23,13 +23,14 @@ __device__ inline int div_round_up( int val, int divisor )
 extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
-	if( threadIdx.x < 256 )
+	for( int i = 0; i < 256; i += 32 )
 	{
-		localCounters[threadIdx.x] = 0;
+		localCounters[i + threadIdx.x] = 0;
 	}
+
 	__syncthreads();
 
-	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 1024 )
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
 		uint64_t itemIndex = blockIdx.x * RADIX_SORT_BLOCK_SIZE + threadIdx.x + i;
 		if( itemIndex < numberOfInputs )
@@ -42,13 +43,12 @@ extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberO
 
 	__syncthreads();
 
-	if( threadIdx.x < 256 )
+	for( int i = 0; i < 256; i += 32 )
 	{
-		// column major: 
 		int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-		int bucketIndex = threadIdx.x;
+		int bucketIndex = i + threadIdx.x;
 		int blockIndex = blockIdx.x;
-		uint64_t counterIndex = bucketIndex * numberOfBlocks + blockIndex; 
+		uint64_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
 		counters[counterIndex] = localCounters[bucketIndex];
 	}
 }
@@ -171,18 +171,42 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 
 extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
-	__shared__ uint32_t psum[256];
+	__shared__ uint32_t localPrefixSum[256];
+	__shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
 
 	int blockIndex = blockIdx.x;
 	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 	for( int i = 0; i < 256; i += 32 )
 	{
-		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
-		psum[i + threadIdx.x] = sums[counterIndex];
+		localPrefixSum[i + threadIdx.x] = 0;
 	}
 	__syncthreads();
 
-#if 1
+	// count
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
+	{
+		int itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		if( itemIndex < numberOfInputs )
+		{
+			auto item = inputs[itemIndex];
+			int bucketIndex = ( item >> bitLocation ) & 0xFF;
+			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
+		}
+	}
+
+	// prefix sum
+	int prefix = 0;
+	for( int i = 0; i < 256; i += 32 )
+	{
+		int digits = i + threadIdx.x;
+		uint32_t p;
+		uint32_t s;
+		warpPrefixSumExclusive( localPrefixSum[digits], &p, &s );
+		localPrefixSum[digits] = prefix + p;
+		prefix += s;
+	}
+
+	// reorder
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
 		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
@@ -193,6 +217,42 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			item = inputs[itemIndex];
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
+		uint32_t location = -1;
+		for( int j = 0; j < 32; j++ )
+		{
+			if( j == threadIdx.x )
+			{
+				if( itemIndex < numberOfInputs )
+				{
+					location = localPrefixSum[bucketIndex]++;
+				}
+			}
+			__syncthreads();
+		}
+		if( location != -1 )
+		{
+			elementIndices[location] = i + threadIdx.x;
+		}
+	}
+
+	// load
+	for( int i = 0; i < 256; i += 32 )
+	{
+		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
+		localPrefixSum[i + threadIdx.x] = sums[counterIndex];
+	}
+	__syncthreads();
+
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
+	{
+		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		RADIX_SORT_TYPE item;
+		uint32_t bucketIndex;
+		if( itemIndex < numberOfInputs )
+		{
+			item = inputs[blockIndex * RADIX_SORT_BLOCK_SIZE + elementIndices[i + threadIdx.x]];
+			bucketIndex = ( item >> bitLocation ) & 0xFF;
+		}
 
 		uint32_t location = -1;
 		for( int j = 0; j < 32; j++ )
@@ -201,7 +261,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			{
 				if( itemIndex < numberOfInputs )
 				{
-					location = psum[bucketIndex]++;
+					location = localPrefixSum[bucketIndex]++;
 				}
 			}
 			__syncthreads();
@@ -211,123 +271,4 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			outputs[location] = item;
 		}
 	}
-#else
-#define N_BATCH 8
-
-	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 * N_BATCH )
-	{
-		RADIX_SORT_TYPE items[N_BATCH];
-		uint32_t bucketIndices[N_BATCH];
-
-		for( int k = 0; k < N_BATCH; k++ )
-		{
-			uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + ( threadIdx.x ) * N_BATCH + k;
-
-			if( itemIndex < numberOfInputs )
-			{
-				items[k] = inputs[itemIndex];
-				bucketIndices[k] = ( items[k] >> bitLocation ) & 0xFF;
-			}
-			else
-			{
-				bucketIndices[k] = -1;
-			}
-		}
-
-		for( int j = 0; j < 32; j++ )
-		{
-			if( j == threadIdx.x )
-			{
-				for( int k = 0; k < N_BATCH; k++ )
-				{
-					if (bucketIndices[k] != -1)
-					{
-						uint32_t location = psum[bucketIndices[k]]++;
-						outputs[location] = items[k];
-					}
-				}
-			}
-			__syncthreads();
-		}
-	}
-#endif
-
-	//for (;;)
-	//{
-	//	uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + item;
-	//	if( itemIndex < numberOfInputs )
-	//	{
-	//		auto item = inputs[itemIndex];
-	//		uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
-	//		if( atomicAdd( &counters[bucketIndex] ) == 0 )
-	//		{
-	//			psum[bucketIndex]++;
-	//			outputs[location] = item;
-	//		}
-	//		else
-	//		{
-
-	//		}
-	//	}
-	//}
-
-	// Maybe we can break prefix sum idx. 
-
-	//int blockIndex = threadIdx.x + blockDim.x * blockIdx.x;
-	//int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-
-	//__shared__ uint32_t psum[32][256];
-
-	//for( int i = 0; i < 256; i++ )
-	//{
-	//	uint32_t counterIndex = i /* bucketIndex */ * numberOfBlocks + blockIndex;
-	//	psum[threadIdx.x][i] = sums[counterIndex];
-	//}
-
-	//for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i++ )
-	//{
-	//	uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i;
-	//	if( numberOfInputs <= itemIndex )
-	//	{
-	//		break;
-	//	}
-	//	auto item = inputs[itemIndex];
-	//	uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
-
-	//	uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
-	//	// uint32_t location = sums[counterIndex]++;
-	//	uint32_t location = psum[threadIdx.x][bucketIndex]++;
-	//	outputs[location] = item;
-	//}
-
-	//#define N_BATCH 8
-
-	//for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += N_BATCH )
-	//{
-	//	RADIX_SORT_TYPE items[N_BATCH];
-	//	for( int j = 0; j < N_BATCH; j++ )
-	//	{
-	//		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + j;
-	//		if( numberOfInputs <= itemIndex )
-	//		{
-	//			break;
-	//		}
-	//		items[j] = inputs[itemIndex];
-	//	}
-
-	//	for (int j = 0; j < N_BATCH; j++)
-	//	{
-	//		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + j;
-	//		if( numberOfInputs <= itemIndex )
-	//		{
-	//			break;
-	//		}
-
-	//		uint32_t bucketIndex = ( items[j] >> bitLocation ) & 0xFF;
-	//		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
-	//		// uint32_t location = sums[counterIndex]++;
-	//		uint32_t location = psum[threadIdx.x][bucketIndex]++;
-	//		outputs[location] = items[j];
-	//	}
-	//}
 }
