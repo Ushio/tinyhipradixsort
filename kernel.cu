@@ -79,8 +79,7 @@ __device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum
 	*p = x - val;
 }
 
-
-extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint32_t numberOfInputs, uint32_t* sums, uint32_t* iterator, uint32_t* globalPrefix )
+extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs, uint32_t* iterator, uint32_t* globalPrefix )
 {
 	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
 
@@ -91,7 +90,7 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint32_t number
 		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
 		uint32_t p;
 		uint32_t s;
-		warpPrefixSumExclusive( itemIndex < numberOfInputs ? inputs[itemIndex] : 0, &p, &s );
+		warpPrefixSumExclusive( itemIndex < numberOfInputs ? inout[itemIndex] : 0, &p, &s );
 		localPrefixSum[i + threadIdx.x] = prefix + p;
 		prefix += s;
 	}
@@ -125,7 +124,8 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint32_t number
 		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
 		if (itemIndex < numberOfInputs)
 		{
-			sums[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
+			// sums[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
+			inout[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
 		}
 	}
 }

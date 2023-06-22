@@ -51,7 +51,7 @@ int main()
 		printf( "failed to init..\n" );
 		return 0;
 	}
-	int deviceIdx = 0;
+	int deviceIdx = 2;
 
 	oroError err;
 	err = oroInit( 0 );
@@ -75,8 +75,8 @@ int main()
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024  * 16 );
-		// std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
-		std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
+		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
+		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
 		splitmix64 rng;
 
@@ -90,7 +90,6 @@ int main()
 		// +---- buckets ( 256 ) ----
 		// |
 		// blocks
-		Buffer counterBuffer( sizeof( uint32_t ) * 256 * numberOfBlocks );
 		Buffer counterPrefixSumBuffer( sizeof( uint32_t ) * 256 * numberOfBlocks );
 		Buffer prefixSumIteratorBuffer( sizeof( uint32_t ) * 2 );
 		Buffer globalPrefixBuffer( sizeof( uint32_t ) );
@@ -118,7 +117,7 @@ int main()
 					ShaderArgument args;
 					args.add( inputsBuffer->data() );
 					args.add( numberOfInputs );
-					args.add( counterBuffer.data() );
+					args.add( counterPrefixSumBuffer.data() );
 					args.add( bitLocation );
 					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
 				}
@@ -128,14 +127,13 @@ int main()
 					//oroStream.start();
 
 					ShaderArgument args;
-					args.add( counterBuffer.data() );
-					args.add( numberOfBlocks * 256 );
 					args.add( counterPrefixSumBuffer.data() );
+					args.add( numberOfBlocks * 256 );
 					args.add( prefixSumIteratorBuffer.data() );
 					args.add( globalPrefixBuffer.data() );
 					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
 					// printf( " prefixSumExclusive %d\n", numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK );
-					shader.launch( "prefixSumExclusive", args, div_round_up( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, 32, 1, 1, stream );
+					shader.launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, 32, 1, 1, stream );
 					
 					//oroStream.stop();
 					//float ms = oroStream.getMs();
@@ -153,6 +151,7 @@ int main()
 					args.add( outputsBuffer->data() );
 					args.add( numberOfInputs );
 					args.add( counterPrefixSumBuffer.data() );
+					// args.add( counterPrefixSumBuffer.data() );
 					args.add( bitLocation );
 
 					shader.launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
@@ -180,13 +179,13 @@ int main()
 			{
 				SH_ASSERT( outputs[i] <= outputs[i + 1] );
 			}
-			//Stopwatch sw;
-			//std::sort( inputs.begin(), inputs.end() );
-			//printf( "cpu %f ms,  %lld\n", sw.elapsed() * 1000.0, inputs[0] );
-			//for( int i = 0; i < outputs.size(); i++ )
-			//{
-			//	SH_ASSERT( outputs[i] == inputs[i] );
-			//}
+			Stopwatch sw;
+			std::sort( inputs.begin(), inputs.end() );
+			printf( "cpu %f ms,  %lld\n", sw.elapsed() * 1000.0, inputs[0] );
+			for( int i = 0; i < outputs.size(); i++ )
+			{
+				SH_ASSERT( outputs[i] == inputs[i] );
+			}
 		}
 		
 		//std::vector<uint32_t> counterBufferRef( 256 * numberOfBlocks );
