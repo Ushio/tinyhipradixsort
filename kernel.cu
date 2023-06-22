@@ -203,9 +203,14 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 		uint32_t p;
 		uint32_t s;
 		warpPrefixSumExclusive( localPrefixSum[digits], &p, &s );
+
+		__syncthreads();
+
 		localPrefixSum[digits] = prefix + p;
 		prefix += s;
 	}
+
+	__syncthreads();
 
 	// reorder
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
