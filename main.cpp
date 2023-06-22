@@ -32,7 +32,7 @@ struct splitmix64
 		return z ^ ( z >> 31 );
 	}
 };
-inline int div_round_up( int val, int divisor )
+inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
 {
 	return ( val + divisor - 1 ) / divisor;
 }
@@ -75,13 +75,13 @@ int main()
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024  * 16 );
-		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
-		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
-
+		// std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
+		std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
+		// std::vector<RADIX_SORT_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
 		splitmix64 rng;
 
-		uint64_t numberOfInputs = inputs.size();
-		uint64_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+		uint32_t numberOfInputs = inputs.size();
+		uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 
 		std::unique_ptr<Buffer> inputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
 		std::unique_ptr<Buffer> outputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
@@ -145,8 +145,8 @@ int main()
 				}
 				// reorder
 				{
-					OroStopwatch oroStream( stream );
-					oroStream.start();
+					//OroStopwatch oroStream( stream );
+					//oroStream.start();
 
 					ShaderArgument args;
 					args.add( inputsBuffer->data() );
@@ -154,15 +154,14 @@ int main()
 					args.add( numberOfInputs );
 					args.add( counterPrefixSumBuffer.data() );
 					args.add( bitLocation );
-					// shader.launch( "reorder", args, div_round_up( numberOfBlocks, 32 ), 1, 1, 32, 1, 1, stream );
 
 					shader.launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
 				
-					oroStream.stop();
-					float ms = oroStream.getMs();
-					oroStreamSynchronize( stream );
+					//oroStream.stop();
+					//float ms = oroStream.getMs();
+					//oroStreamSynchronize( stream );
 
-					printf( "reorder %f ms\n", ms );
+					//printf( "reorder %f ms\n", ms );
 				}
 
 				std::swap( inputsBuffer, outputsBuffer );

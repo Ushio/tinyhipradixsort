@@ -5,7 +5,6 @@ typedef unsigned char uint8_t;
 
 #define RADIX_SORT_BLOCK_SIZE 1024
 
-// TODO out of range handling
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
 //#define RADIX_SORT_TYPE uint64_t
@@ -15,12 +14,12 @@ typedef unsigned char uint8_t;
 	#define ITS 1
 #endif
 
-__device__ inline int div_round_up( int val, int divisor )
+__device__ inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
 {
 	return ( val + divisor - 1 ) / divisor;
 }
 
-extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
+extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
 	for( int i = 0; i < 256; i += 32 )
@@ -32,7 +31,7 @@ extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberO
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
-		uint64_t itemIndex = blockIdx.x * RADIX_SORT_BLOCK_SIZE + threadIdx.x + i;
+		uint32_t itemIndex = blockIdx.x * RADIX_SORT_BLOCK_SIZE + threadIdx.x + i;
 		if( itemIndex < numberOfInputs )
 		{
 			auto item = inputs[itemIndex];
@@ -45,10 +44,10 @@ extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint64_t numberO
 
 	for( int i = 0; i < 256; i += 32 )
 	{
-		int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-		int bucketIndex = i + threadIdx.x;
-		int blockIndex = blockIdx.x;
-		uint64_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
+		uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+		uint32_t bucketIndex = i + threadIdx.x;
+		uint32_t blockIndex = blockIdx.x;
+		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
 		counters[counterIndex] = localCounters[bucketIndex];
 	}
 }
@@ -81,15 +80,15 @@ __device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum
 }
 
 
-extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t* iterator, uint32_t* globalPrefix )
+extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint32_t numberOfInputs, uint32_t* sums, uint32_t* iterator, uint32_t* globalPrefix )
 {
 	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
 
-	int blockIndex = blockIdx.x;
-	int prefix = 0;
+	uint32_t blockIndex = blockIdx.x;
+	uint32_t prefix = 0;
 	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += 32 )
 	{
-		int itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
+		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
 		uint32_t p;
 		uint32_t s;
 		warpPrefixSumExclusive( itemIndex < numberOfInputs ? inputs[itemIndex] : 0, &p, &s );
@@ -97,7 +96,7 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 		prefix += s;
 	}
 
-	int gp;
+	uint32_t gp;
 	if( threadIdx.x == 0 )
 	{
 		while( atomicAdd( iterator, 0 ) != blockIndex )
@@ -113,44 +112,6 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 		atomicInc( iterator, 0xFFFFFFFF );
 	}
 
-	//  64bit it = ( counter )( offset ) 
-	//int gp;
-	//if( threadIdx.x == 0 )
-	//{
-	//	uint64_t old = counter[0];
-	//	uint64_t expected;
-	//	do
-	//	{
-	//		uint32_t previous = old & 0xFFFFFFFF;
-	//		expected = previous + ( (uint64_t)( blockIndex ) << 32 );
-	//		uint64_t newValue = previous + prefix + ( (uint64_t)( blockIndex + 1 ) << 32 );
-	//		old = atomicCAS( iterator, expected, newValue );
-	//	} while( old != expected );
-	//	gp = old & 0xFFFFFFFF;
-	//}
-
-	//int gp;
-	//if( threadIdx.x == 0 )
-	//{
-	//	struct Context
-	//	{
-	//		uint64_t prefix : 32;
-	//		uint64_t iterator : 32;
-	//	};
-	//	Context old = *(Context*)iterator;
-	//	Context expected;
-	//	do
-	//	{
-	//		expected.prefix = old.prefix;
-	//		expected.iterator = blockIndex;
-	//		Context newValue;
-	//		newValue.prefix = old.prefix + prefix;
-	//		newValue.iterator = blockIndex + 1;
-	//		old = atomicCAS( iterator, expected, &newValue );
-	//	} while( old != expected );
-	//	gp = old & 0xFFFFFFFF;
-	//}
-
 #if defined( ITS )
 	__syncwarp( 0xffffffff );
 	gp = __shfl_sync( 0xffffffff, gp, 0 );
@@ -161,7 +122,7 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 
 	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += 32 )
 	{
-		int itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
+		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
 		if (itemIndex < numberOfInputs)
 		{
 			sums[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
@@ -169,14 +130,14 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 	}
 }
 
-extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
 #if 1
 	__shared__ uint32_t localPrefixSum[256];
 	__shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
 
-	int blockIndex = blockIdx.x;
-	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+	uint32_t blockIndex = blockIdx.x;
+	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 	for( int i = 0; i < 256; i += 32 )
 	{
 		localPrefixSum[i + threadIdx.x] = 0;
@@ -186,17 +147,17 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 	// count
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
-		int itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		if( itemIndex < numberOfInputs )
 		{
 			auto item = inputs[itemIndex];
-			int bucketIndex = ( item >> bitLocation ) & 0xFF;
+			uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 		}
 	}
 
 	// prefix sum
-	int prefix = 0;
+	uint16_t prefix = 0;
 	for( int i = 0; i < 256; i += 32 )
 	{
 		int digits = i + threadIdx.x;
@@ -215,7 +176,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 	// reorder
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
-		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		RADIX_SORT_TYPE item;
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
@@ -251,7 +212,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
-		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		RADIX_SORT_TYPE item;
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
@@ -280,8 +241,8 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 #else
 	__shared__ uint32_t psum[256];
 
-	int blockIndex = blockIdx.x;
-	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+	uint32_t blockIndex = blockIdx.x;
+	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 	for( int i = 0; i < 256; i += 32 )
 	{
 		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
@@ -291,7 +252,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
-		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		RADIX_SORT_TYPE item;
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
