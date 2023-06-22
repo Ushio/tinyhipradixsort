@@ -171,6 +171,7 @@ extern "C" __global__ void prefixSumExclusive( uint32_t* inputs, uint64_t number
 
 extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint64_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
+#if 1
 	__shared__ uint32_t localPrefixSum[256];
 	__shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
 
@@ -271,4 +272,45 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			outputs[location] = item;
 		}
 	}
+#else
+	__shared__ uint32_t psum[256];
+
+	int blockIndex = blockIdx.x;
+	int numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
+	for( int i = 0; i < 256; i += 32 )
+	{
+		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
+		psum[i + threadIdx.x] = sums[counterIndex];
+	}
+	__syncthreads();
+
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
+	{
+		uint64_t itemIndex = (uint64_t)blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+		RADIX_SORT_TYPE item;
+		uint32_t bucketIndex;
+		if( itemIndex < numberOfInputs )
+		{
+			item = inputs[itemIndex];
+			bucketIndex = ( item >> bitLocation ) & 0xFF;
+		}
+
+		uint32_t location = -1;
+		for( int j = 0; j < 32; j++ )
+		{
+			if( j == threadIdx.x )
+			{
+				if( itemIndex < numberOfInputs )
+				{
+					location = psum[bucketIndex]++;
+				}
+			}
+			__syncthreads();
+		}
+		if( location != -1 )
+		{
+			outputs[location] = item;
+		}
+	}
+#endif
 }
