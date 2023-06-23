@@ -5,7 +5,7 @@ typedef unsigned char uint8_t;
 
 #define RADIX_SORT_BLOCK_SIZE 2048
 
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
 
 //#define RADIX_SORT_TYPE uint64_t
 #define RADIX_SORT_TYPE uint32_t
