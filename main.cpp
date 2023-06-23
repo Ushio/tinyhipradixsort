@@ -36,7 +36,7 @@ inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
 {
 	return ( val + divisor - 1 ) / divisor;
 }
-#define RADIX_SORT_BLOCK_SIZE 1024
+#define RADIX_SORT_BLOCK_SIZE 2048
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 //#define RADIX_SORT_TYPE uint64_t
 #define RADIX_SORT_TYPE uint32_t
@@ -74,7 +74,7 @@ int main()
 	{
 		std::string baseDir = "../"; /* repository root */
 		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
-		// std::vector<RADIX_SORT_TYPE> inputs( 1024  * 16 );
+		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );
 		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );

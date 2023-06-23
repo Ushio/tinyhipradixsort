@@ -3,7 +3,7 @@ typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
-#define RADIX_SORT_BLOCK_SIZE 1024
+#define RADIX_SORT_BLOCK_SIZE 2048
 
 #define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
@@ -18,15 +18,22 @@ __device__ inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
 {
 	return ( val + divisor - 1 ) / divisor;
 }
+template <int NElement, int NThread, class T>
+__device__ void clearShared( T* sMem, T value )
+{
+	for( int i = 0; i < NElement; i += NThread )
+	{
+		if( i < NElement )
+		{
+			sMem[i + threadIdx.x] = value;
+		}
+	}
+}
 
 extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
-	for( int i = 0; i < 256; i += 32 )
-	{
-		localCounters[i + threadIdx.x] = 0;
-	}
-
+	clearShared<256, 32, uint32_t>( localCounters, 0 );
 	__syncthreads();
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
@@ -135,13 +142,11 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 #if 1
 	__shared__ uint32_t localPrefixSum[256];
 	__shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
+	__shared__ uint32_t matchMasks[256];
 
 	uint32_t blockIndex = blockIdx.x;
 	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-	for( int i = 0; i < 256; i += 32 )
-	{
-		localPrefixSum[i + threadIdx.x] = 0;
-	}
+	clearShared<256, 32, uint32_t>( localPrefixSum, 0 );
 	__syncthreads();
 
 	// count
@@ -184,21 +189,28 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			item = inputs[itemIndex];
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
-		uint32_t location = -1;
-		for( int j = 0; j < 32; j++ )
+
+		clearShared<256, 32, uint32_t>( matchMasks, 0 );
+		__syncthreads();
+		if( itemIndex < numberOfInputs )
 		{
-			if( j == threadIdx.x )
-			{
-				if( itemIndex < numberOfInputs )
-				{
-					location = localPrefixSum[bucketIndex]++;
-				}
-			}
-			__syncthreads();
+			atomicOr( &matchMasks[bucketIndex], 1u << threadIdx.x );
 		}
-		if( location != -1 )
+		__syncthreads();
+
+		if( itemIndex < numberOfInputs )
 		{
-			elementIndices[location] = i + threadIdx.x;
+			uint32_t matchMask = matchMasks[bucketIndex];
+			uint32_t lowerMask = ( 1u << threadIdx.x ) - 1;
+			uint32_t offset = __popc( matchMask & lowerMask );
+			uint32_t location = localPrefixSum[bucketIndex];
+			elementIndices[location + offset] = i + threadIdx.x;
+
+			int lowest = __ffs( matchMask ) - 1;
+			if( lowest == threadIdx.x )
+			{
+				localPrefixSum[bucketIndex] += __popc( matchMask );
+			}
 		}
 	}
 
@@ -221,25 +233,32 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
 
-		uint32_t location = -1;
-		for( int j = 0; j < 32; j++ )
+		clearShared<256, 32, uint32_t>( matchMasks, 0 );
+		__syncthreads();
+		if( itemIndex < numberOfInputs )
 		{
-			if( j == threadIdx.x )
-			{
-				if( itemIndex < numberOfInputs )
-				{
-					location = localPrefixSum[bucketIndex]++;
-				}
-			}
-			__syncthreads();
+			atomicOr( &matchMasks[bucketIndex], 1u << threadIdx.x );
 		}
-		if( location != -1 )
+		__syncthreads();
+
+		if( itemIndex < numberOfInputs )
 		{
-			outputs[location] = item;
+			uint32_t matchMask = matchMasks[bucketIndex];
+			uint32_t lowerMask = ( 1u << threadIdx.x ) - 1;
+			uint32_t offset = __popc( matchMask & lowerMask );
+			uint32_t location = localPrefixSum[bucketIndex];
+			outputs[location + offset] = item;
+
+			int lowest = __ffs( matchMask ) - 1;
+			if( lowest == threadIdx.x )
+			{
+				localPrefixSum[bucketIndex] += __popc( matchMask );
+			}
 		}
 	}
 #else
 	__shared__ uint32_t psum[256];
+	__shared__ uint32_t matchMasks[256];
 
 	uint32_t blockIndex = blockIdx.x;
 	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
@@ -260,7 +279,6 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 			item = inputs[itemIndex];
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
-
 		uint32_t location = -1;
 		for( int j = 0; j < 32; j++ )
 		{
