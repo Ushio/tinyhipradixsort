@@ -91,7 +91,6 @@ int main()
 		// |
 		// blocks
 		Buffer counterPrefixSumBuffer( sizeof( uint32_t ) * 256 * numberOfBlocks );
-		Buffer prefixSumIteratorBuffer( sizeof( uint32_t ) * 2 );
 
 		for (;;)
 		{
@@ -107,8 +106,6 @@ int main()
 			for (int i = 0; i < 4; i++)
 			{
 				uint32_t bitLocation = i * 8;
-
-				oroMemsetD32Async( (oroDeviceptr)prefixSumIteratorBuffer.data(), 0, prefixSumIteratorBuffer.bytes() / 4, stream );
 
 				// counter
 				{
@@ -127,7 +124,7 @@ int main()
 					ShaderArgument args;
 					args.add( counterPrefixSumBuffer.data() );
 					args.add( numberOfBlocks * 256 );
-					args.add( prefixSumIteratorBuffer.data() );
+					// args.add( prefixSumIteratorBuffer.data() );
 					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
 					// printf( " prefixSumExclusive %d\n", numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK );
 					shader.launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, 32, 1, 1, stream );
@@ -148,7 +145,6 @@ int main()
 					args.add( outputsBuffer->data() );
 					args.add( numberOfInputs );
 					args.add( counterPrefixSumBuffer.data() );
-					// args.add( counterPrefixSumBuffer.data() );
 					args.add( bitLocation );
 
 					shader.launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );

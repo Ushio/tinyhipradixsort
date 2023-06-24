@@ -30,6 +30,8 @@ __device__ void clearShared( T* sMem, T value )
 	}
 }
 
+__device__ uint64_t g_iterator;
+
 extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
@@ -57,6 +59,9 @@ extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint32_t numberO
 		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
 		counters[counterIndex] = localCounters[bucketIndex];
 	}
+
+	if( blockIdx.x == 0 && threadIdx.x == 0 )
+		g_iterator = 0;
 }
 
 __device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum )
@@ -81,12 +86,13 @@ __device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum
 	__syncwarp( 0xffffffff );
 	*sum = __shfl_sync( 0xffffffff, x, 31 );
 #else
+	__syncthreads();
 	*sum = __shfl( x, 31 );
 #endif
 	*p = x - val;
 }
 
-extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs, uint64_t* iterator )
+extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs )
 {
 	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
 
@@ -106,13 +112,13 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 	if( threadIdx.x == 0 )
 	{
 		uint64_t expected;
-		uint64_t cur = iterator[0];
+		uint64_t cur = g_iterator;
 		gp = cur & 0xFFFFFFFF;
 		do
 		{
 			expected = (uint64_t)gp + ( (uint64_t)( blockIndex ) << 32 );
 			uint64_t newValue = (uint64_t)gp + prefix | ( (uint64_t)( blockIndex + 1 ) << 32 );
-			cur = atomicCAS( iterator, expected, newValue );
+			cur = atomicCAS( &g_iterator, expected, newValue );
 			gp = cur & 0xFFFFFFFF;
 		} while( cur != expected );
 	}
