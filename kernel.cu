@@ -202,12 +202,13 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 			uint32_t offset = __popc( matchMask & lowerMask );
 			uint32_t location = localPrefixSum[bucketIndex];
 			elementIndices[location + offset] = i + threadIdx.x;
+		}
 
-			int lowest = __ffs( matchMask ) - 1;
-			if( lowest == threadIdx.x )
-			{
-				localPrefixSum[bucketIndex] += __popc( matchMask );
-			}
+		__syncthreads();
+
+		if( itemIndex < numberOfInputs )
+		{
+			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 		}
 	}
 
@@ -245,12 +246,13 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 			uint32_t offset = __popc( matchMask & lowerMask );
 			uint32_t location = localPrefixSum[bucketIndex];
 			outputs[location + offset] = item;
+		}
 
-			int lowest = __ffs( matchMask ) - 1;
-			if( lowest == threadIdx.x )
-			{
-				localPrefixSum[bucketIndex] += __popc( matchMask );
-			}
+		__syncthreads();
+
+		if( itemIndex < numberOfInputs )
+		{
+			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 		}
 	}
 #else
