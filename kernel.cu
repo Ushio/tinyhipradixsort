@@ -86,7 +86,7 @@ __device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum
 	*p = x - val;
 }
 
-extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs, uint32_t* iterator, uint32_t* globalPrefix )
+extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs, uint64_t* iterator )
 {
 	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
 
@@ -102,20 +102,19 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 		prefix += s;
 	}
 
-	uint32_t gp;
+	int gp;
 	if( threadIdx.x == 0 )
 	{
-		while( atomicAdd( iterator, 0 ) != blockIndex )
-			;
-
-		__threadfence();
-
-		gp = *globalPrefix;
-		*globalPrefix += prefix;
-
-		__threadfence();
-
-		atomicInc( iterator, 0xFFFFFFFF );
+		uint64_t expected;
+		uint64_t cur = iterator[0];
+		gp = cur & 0xFFFFFFFF;
+		do
+		{
+			expected = (uint64_t)gp + ( (uint64_t)( blockIndex ) << 32 );
+			uint64_t newValue = (uint64_t)gp + prefix | ( (uint64_t)( blockIndex + 1 ) << 32 );
+			cur = atomicCAS( iterator, expected, newValue );
+			gp = cur & 0xFFFFFFFF;
+		} while( cur != expected );
 	}
 
 #if defined( ITS )
@@ -131,7 +130,6 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
 		if (itemIndex < numberOfInputs)
 		{
-			// sums[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
 			inout[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
 		}
 	}
