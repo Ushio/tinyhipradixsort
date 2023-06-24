@@ -75,7 +75,20 @@ int main()
 	{
 		std::string baseDir = "../"; /* repository root */
 
-		thrs::RadixSort radixsort( ( baseDir + "\\kernel.cu" ).c_str(), {} );
+		std::vector<std::string> extraArgs;
+		if( isNvidia )
+		{
+			extraArgs.push_back( ARG_DEBINFO_NV );
+
+			// ITS enabled
+			extraArgs.push_back( "--gpu-architecture=compute_70" );
+		}
+		else
+		{
+			extraArgs.push_back( ARG_DEBINFO_AMD );
+		}
+
+		thrs::RadixSort radixsort( ( baseDir + "\\kernel.cu" ).c_str(), extraArgs );
 
 		// Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );

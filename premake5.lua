@@ -12,13 +12,14 @@ project "cudaEnv"
     flags { "MultiProcessorCompile", "NoPCH" }
 
     -- Src
-    files { "cudaEnv.cpp", "tinyhipradixsort.hpp" }
+    files { "cudaEnv.cu", "tinyhipradixsort.hpp" }
 
     -- CUDA
+    buildcustomizations "BuildCustomizations/CUDA 12.0"
     includedirs { "$(CUDA_PATH)/include" }
     libdirs { "$(CUDA_PATH)/lib/x64" }
     links { "cuda" }
-    
+
     -- filter {"Debug"}
     --     links { "prlib_d" }
     -- UTF8
