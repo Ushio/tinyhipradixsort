@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <memory>
 #include "Orochi/OrochiUtils.h"
+#include "tinyhipradixsort.hpp"
 
 class Stopwatch
 {
@@ -73,7 +74,10 @@ int main()
 
 	{
 		std::string baseDir = "../"; /* repository root */
-		Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
+
+		thrs::RadixSort radixsort( ( baseDir + "\\kernel.cu" ).c_str(), {} );
+
+		// Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );
 		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
@@ -81,7 +85,6 @@ int main()
 		splitmix64 rng;
 
 		uint32_t numberOfInputs = inputs.size();
-		uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 
 		std::unique_ptr<Buffer> inputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
 		std::unique_ptr<Buffer> outputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
@@ -90,7 +93,7 @@ int main()
 		// +---- buckets ( 256 ) ----
 		// |
 		// blocks
-		Buffer counterPrefixSumBuffer( sizeof( uint32_t ) * 256 * numberOfBlocks );
+		Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ) );
 
 		for (;;)
 		{
@@ -103,61 +106,8 @@ int main()
 
 			OroStopwatch oroStream( stream );
 			oroStream.start();
-			for (int i = 0; i < 4; i++)
-			{
-				uint32_t bitLocation = i * 8;
 
-				// counter
-				{
-					ShaderArgument args;
-					args.add( inputsBuffer->data() );
-					args.add( numberOfInputs );
-					args.add( counterPrefixSumBuffer.data() );
-					args.add( bitLocation );
-					shader.launch( "blockCount", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
-				}
-				// Prefix Sum 
-				{
-					//OroStopwatch oroStream( stream );
-					//oroStream.start();
-
-					ShaderArgument args;
-					args.add( counterPrefixSumBuffer.data() );
-					args.add( numberOfBlocks * 256 );
-					// args.add( prefixSumIteratorBuffer.data() );
-					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
-					// printf( " prefixSumExclusive %d\n", numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK );
-					shader.launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, 32, 1, 1, stream );
-					
-					//oroStream.stop();
-					//float ms = oroStream.getMs();
-					//oroStreamSynchronize( stream );
-
-					//printf( "pSum %f ms\n", ms );
-				}
-				// reorder
-				{
-					//OroStopwatch oroStream( stream );
-					//oroStream.start();
-
-					ShaderArgument args;
-					args.add( inputsBuffer->data() );
-					args.add( outputsBuffer->data() );
-					args.add( numberOfInputs );
-					args.add( counterPrefixSumBuffer.data() );
-					args.add( bitLocation );
-
-					shader.launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
-				
-					//oroStream.stop();
-					//float ms = oroStream.getMs();
-					//oroStreamSynchronize( stream );
-
-					//printf( "reorder %f ms\n", ms );
-				}
-
-				std::swap( inputsBuffer, outputsBuffer );
-			}
+			void* output = radixsort.sortKeys( inputsBuffer->data(), outputsBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), stream );
 
 			oroStream.stop();
 			float ms = oroStream.getMs();
@@ -166,7 +116,7 @@ int main()
 			printf( "%f ms\n", ms );
 
 			std::vector<RADIX_SORT_TYPE> outputs( inputs.size() );
-			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)inputsBuffer->data(), sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
+			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)output, sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
 
 			for (int i = 0; i < outputs.size() - 1; i++)
 			{

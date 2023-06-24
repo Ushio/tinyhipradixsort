@@ -3,13 +3,6 @@ typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
-#define RADIX_SORT_BLOCK_SIZE 2048
-
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
-
-//#define RADIX_SORT_TYPE uint64_t
-#define RADIX_SORT_TYPE uint32_t
-
 #if defined( CUDART_VERSION ) && CUDART_VERSION >= 9000
 	#define ITS 1
 #endif
@@ -32,7 +25,7 @@ __device__ void clearShared( T* sMem, T value )
 
 __device__ uint64_t g_iterator;
 
-extern "C" __global__ void blockCount( RADIX_SORT_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
+extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
 	clearShared<256, 32, uint32_t>( localCounters, 0 );
@@ -141,7 +134,7 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 	}
 }
 
-extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* outputs, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_TYPE* outputs, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
 #if 1
 	__shared__ uint32_t localPrefixSum[256];
@@ -186,7 +179,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
-		RADIX_SORT_TYPE item;
+		RADIX_SORT_KEY_TYPE item;
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
 		{
@@ -229,7 +222,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
-		RADIX_SORT_TYPE item;
+		RADIX_SORT_KEY_TYPE item;
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
 		{
@@ -276,7 +269,7 @@ extern "C" __global__ void reorder( RADIX_SORT_TYPE* inputs, RADIX_SORT_TYPE* ou
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
 	{
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
-		RADIX_SORT_TYPE item;
+		RADIX_SORT_KEY_TYPE item;
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
 		{
