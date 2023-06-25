@@ -33,17 +33,9 @@ struct splitmix64
 		return z ^ ( z >> 31 );
 	}
 };
-inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
-{
-	return ( val + divisor - 1 ) / divisor;
-}
-#define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
+
 //#define RADIX_SORT_TYPE uint64_t
 #define RADIX_SORT_TYPE uint32_t
-
-static_assert( 32 <= RADIX_SORT_BLOCK_SIZE, "" );
-static_assert( ( RADIX_SORT_BLOCK_SIZE % 32 ) == 0, "" );
 
 int main()
 {
@@ -86,8 +78,19 @@ int main()
 		{
 			extraArgs.push_back( ARG_DEBINFO_AMD );
 		}
-
-		thrs::RadixSort radixsort( extraArgs );
+		thrs::RadixSort::Config config;
+		switch (sizeof(RADIX_SORT_TYPE))
+		{
+		case 4:
+			config.keyType == thrs::KeyType::U32;
+			break;
+		case 8:
+			config.keyType == thrs::KeyType::U64;
+			break;
+		default:
+			THRS_ASSERT( 1 );
+		}
+		thrs::RadixSort radixsort( extraArgs, config );
 
 		// Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );
@@ -120,7 +123,7 @@ int main()
 			OroStopwatch oroStream( stream );
 			oroStream.start();
 
-			void* output = radixsort.sortKeys( inputsBuffer->data(), outputsBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), stream );
+			void* output = radixsort.sortKeys( inputsBuffer->data(), outputsBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, 32, stream );
 
 			oroStream.stop();
 			float ms = oroStream.getMs();

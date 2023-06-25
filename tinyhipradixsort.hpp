@@ -12,9 +12,6 @@
 #include <intrin.h>
 #define THRS_ASSERT(ExpectTrue) if((ExpectTrue) == 0) { __debugbreak(); }
 
-
-#define THRS_STREAM oroStream
-
 namespace thrs
 {
     inline void loadFileAsVector( std::vector<char>* buffer, const char* fllePath )
@@ -187,6 +184,11 @@ namespace thrs
 		RadixSort( std::vector<std::string> extraArgs, const Config& config = Config() )
         :m_config( config )
         {
+			THRS_ASSERT( 32 <= config.radixSortBlockSize );
+			THRS_ASSERT( ( config.radixSortBlockSize % 32 ) == 0 );
+			THRS_ASSERT( 32 <= config.prefixScanBlockSize );
+			THRS_ASSERT( ( config.prefixScanBlockSize % 32 ) == 0 );
+
             // shader settings
 			extraArgs.push_back( std::string( "-DRADIX_SORT_BLOCK_SIZE=" ) + std::to_string( m_config.radixSortBlockSize ) );
 			extraArgs.push_back( std::string( "-DRADIX_SORT_PREFIX_SCAN_BLOCK=" ) + std::to_string( m_config.prefixScanBlockSize ) );
@@ -220,18 +222,20 @@ namespace thrs
 			return sizeof( uint32_t ) * 256 * numberOfBlocks;
         }
 
-		void* sortKeys( void* inputBuffer, void* outputBuffer, uint32_t numberOfInputs, void* temporaryBuffer, THRS_STREAM stream )
+		void* sortKeys( void* inputKeyBuffer, void* outputKeyBuffer, uint32_t numberOfInputs, void* temporaryBuffer, int startBits, int endBits, oroStream stream )
         {
+			THRS_ASSERT( ( ( endBits - startBits ) % 8 ) == 0 );
+
 			uint32_t numberOfBlocks = div_round_up( numberOfInputs, m_config.radixSortBlockSize );
 
-			for( int i = 0; i < 4; i++ )
+			for( int i = 0; ( startBits + i * 8 ) < endBits; i++ )
 			{
-				uint32_t bitLocation = i * 8;
+				uint32_t bitLocation = startBits + i * 8;
 
 				// counter
 				{
 					ShaderArgument args;
-					args.add( inputBuffer );
+					args.add( inputKeyBuffer );
 					args.add( numberOfInputs );
 					args.add( temporaryBuffer );
 					args.add( bitLocation );
@@ -245,9 +249,6 @@ namespace thrs
 					ShaderArgument args;
 					args.add( temporaryBuffer );
 					args.add( numberOfBlocks * 256 );
-					// args.add( prefixSumIteratorBuffer.data() );
-					// shader.launch( "prefixSumExclusive", args, 1, 1, 1, 32, 1, 1, stream );
-					// printf( " prefixSumExclusive %d\n", numberOfBlocks * 256 / RADIX_SORT_PREFIX_SCAN_BLOCK );
 					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, m_config.prefixScanBlockSize ), 1, 1, 32, 1, 1, stream );
 
 					// oroStream.stop();
@@ -262,8 +263,8 @@ namespace thrs
 					// oroStream.start();
 
 					ShaderArgument args;
-					args.add( inputBuffer );
-					args.add( outputBuffer );
+					args.add( inputKeyBuffer );
+					args.add( outputKeyBuffer );
 					args.add( numberOfInputs );
 					args.add( temporaryBuffer );
 					args.add( bitLocation );
@@ -277,9 +278,9 @@ namespace thrs
 					// printf( "reorder %f ms\n", ms );
 				}
 
-				std::swap( inputBuffer, outputBuffer );
+				std::swap( inputKeyBuffer, outputKeyBuffer );
 			}
-			return inputBuffer;
+			return inputKeyBuffer;
         }
     private:
         std::unique_ptr<Shader> m_shader;
