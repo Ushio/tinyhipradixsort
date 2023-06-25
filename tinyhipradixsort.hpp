@@ -508,6 +508,33 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
         U64,
         U128,
     };
+	inline int bytesOf( KeyType valueType )
+	{
+		switch( valueType )
+		{
+		case KeyType::U32:
+			return 4;
+		case KeyType::U64:
+			return 8;
+		}
+		THRS_ASSERT( 0 );
+		return 0;
+	}
+	inline int bytesOf( ValueType valueType )
+	{
+		switch( valueType )
+		{
+		case ValueType::U32:
+			return 4;
+		case ValueType::U64:
+			return 8;
+		case ValueType::U128:
+			return 16;
+		}
+		THRS_ASSERT( 0 );
+		return 0;
+	}
+
 
     inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
 	{
@@ -647,24 +674,8 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			TemporaryBufferDef def = {};
 			uint64_t numberOfBlocks = div_round_up( numberOfMaxInputs, m_config.radixSortBlockSize );
 			def.pSumBuffer = next_multiple( sizeof( uint32_t ) * 256 * numberOfBlocks, alignment );
-
-			uint64_t keyBytes = m_config.keyType == KeyType::U32 ? sizeof( uint32_t ) : sizeof( uint64_t );
-			def.keyOutBuffer = next_multiple( keyBytes * numberOfMaxInputs, alignment );
-
-			uint64_t valueBytes = 0;
-			switch( m_config.valueType )
-			{
-			case ValueType::U32:
-				valueBytes = sizeof( uint32_t );
-				break;
-			case ValueType::U64:
-				valueBytes = sizeof( uint32_t ) * 2;
-				break;
-			case ValueType::U128:
-				valueBytes = sizeof( uint32_t ) * 4;
-				break;
-			}
-			def.valueOutBuffer = next_multiple( valueBytes * numberOfMaxInputs, alignment );
+			def.keyOutBuffer = next_multiple( bytesOf( m_config.keyType ) * numberOfMaxInputs, alignment );
+			def.valueOutBuffer = next_multiple( bytesOf( m_config.valueType ) * numberOfMaxInputs, alignment );
 			return def;
         }
 
@@ -689,6 +700,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 
 			uint32_t numberOfBlocks = div_round_up( numberOfInputs, m_config.radixSortBlockSize );
 
+			int iteration = 0;
 			for( int i = 0; ( startBits + i * 8 ) < endBits; i++ )
 			{
 				uint32_t bitLocation = startBits + i * 8;
@@ -751,12 +763,21 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					// oroStreamSynchronize( stream );
 
 					// printf( "reorder %f ms\n", ms );
+
+					iteration++;
 				}
 				std::swap( inputKeyBuffer, outputKeyBuffer );
 				std::swap( inputValueBuffer, outputValueBuffer );
 			}
 
-			// todo odd case.
+			if( (iteration % 2) == 1 )
+			{
+				oroMemcpyDtoD( (oroDeviceptr)outputKeyBuffer, (oroDeviceptr)inputKeyBuffer, (uint64_t)bytesOf( m_config.keyType ) * numberOfInputs );
+				if( keyPair )
+				{
+					oroMemcpyDtoD( (oroDeviceptr)outputValueBuffer, (oroDeviceptr)inputValueBuffer, (uint64_t)bytesOf( m_config.valueType ) * numberOfInputs );
+				}
+			}
 		}
     private:
         std::unique_ptr<Shader> m_shader;

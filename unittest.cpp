@@ -132,6 +132,111 @@ UTEST( SortKeys, u64 )
 						{ ASSERT_TRUE( e ); } );
 }
 
+
+UTEST( StartBits, u64 )
+{
+	using KeyType = uint64_t;
+	using ValueType = uint32_t;
+
+	// sortKeys
+	{
+		thrs::RadixSort::Config config;
+		config.configureWithKey<KeyType>();
+		thrs::RadixSort radixsort( extraArgs, config );
+
+		splitmix64 rng;
+
+		for( int i = 0; i < TEST_ITERATION; i++ )
+		{
+			int numberOfInputs = 1 + rng.next() % ( TEST_MAX_ARRAY_SIZE - 1 );
+			int startBit = rng.next() % 64;
+
+			std::vector<KeyType> inputKeys( numberOfInputs );
+			randomizeValues( &rng, &inputKeys );
+
+			thrs::Buffer inputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer.data(), inputKeys.data(), sizeof( KeyType ) * inputKeys.size(), stream );
+
+			thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+
+			radixsort.sortKeys( inputKeyBuffer.data(), numberOfInputs, tmpBuffer.data(), startBit, startBit + 8, stream );
+
+			oroStreamSynchronize( stream );
+
+			std::vector<KeyType> outputKeys( inputKeys.size() );
+			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
+
+			std::stable_sort( inputKeys.begin(), inputKeys.end(), [startBit]( KeyType a, KeyType b )
+			{ 
+				uint32_t bitA = ( a >> startBit ) & 0xFF;
+				uint32_t bitB = ( b >> startBit ) & 0xFF;
+				return bitA < bitB;
+			} );
+
+			for( int i = 0; i < inputKeys.size(); i++ )
+			{
+				ASSERT_TRUE( inputKeys[i] == outputKeys[i] );
+			}
+		}
+	}
+
+	// sortPairs
+	thrs::RadixSort::Config config;
+	config.configureWithKeyPair<KeyType, ValueType>();
+	thrs::RadixSort radixsort( extraArgs, config );
+
+	splitmix64 rng;
+	for( int i = 0; i < TEST_ITERATION; i++ )
+	{
+		int numberOfInputs = 1 + rng.next() % ( TEST_MAX_ARRAY_SIZE - 1 );
+		int startBit = rng.next() % 64;
+
+		std::vector<KeyType> inputKeys( numberOfInputs );
+		std::vector<ValueType> inputValues( numberOfInputs );
+		randomizeValues( &rng, &inputKeys );
+
+		for( int i = 0; i < inputValues.size(); i++ )
+		{
+			inputValues[i] = ValueType( i );
+		}
+
+		thrs::Buffer inputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
+		oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer.data(), inputKeys.data(), sizeof( KeyType ) * inputKeys.size(), stream );
+
+		thrs::Buffer inputValueBuffer( sizeof( ValueType ) * numberOfInputs );
+		oroMemcpyHtoDAsync( (oroDeviceptr)inputValueBuffer.data(), inputValues.data(), sizeof( ValueType ) * inputValues.size(), stream );
+
+		thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
+
+		radixsort.sortPairs( inputKeyBuffer.data(), inputValueBuffer.data(), numberOfInputs, tmpBuffer.data(), startBit, startBit + 8, stream );
+
+		oroStreamSynchronize( stream );
+
+		std::vector<KeyType> outputKeys( inputKeys.size() );
+		oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
+		std::vector<ValueType> outputValues( inputValues.size() );
+		oroMemcpyDtoH( outputValues.data(), (oroDeviceptr)inputValueBuffer.data(), sizeof( ValueType ) * numberOfInputs );
+
+		std::vector<std::pair<KeyType, ValueType>> pairs( inputKeys.size() );
+		for( int i = 0; i < inputKeys.size(); i++ )
+		{
+			pairs[i].first = inputKeys[i];
+			pairs[i].second = inputValues[i];
+		}
+		std::stable_sort( pairs.begin(), pairs.end(), [startBit]( std::pair<KeyType, ValueType> a, std::pair<KeyType, ValueType> b )
+		{ 
+			uint32_t bitA = ( a.first >> startBit ) & 0xFF;
+			uint32_t bitB = ( b.first >> startBit ) & 0xFF;
+			return bitA < bitB; 
+		} );
+		for( int i = 0; i < outputKeys.size(); i++ )
+		{
+			ASSERT_TRUE( outputKeys[i] == pairs[i].first );
+			ASSERT_TRUE( outputValues[i] == pairs[i].second );
+		}
+	}
+}
+
 // == Pairs ==
 
 template <class KeyType, class ValueType>
