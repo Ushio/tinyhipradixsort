@@ -1,7 +1,6 @@
-#include "shader.hpp"
-
 #include <stdint.h>
 #include <memory>
+#include <algorithm>
 #include "Orochi/OrochiUtils.h"
 
 #define THRS_KERNEL_FROM_FILE 1
@@ -36,10 +35,11 @@ struct splitmix64
 	}
 };
 
-// #define RADIX_SORT_TYPE uint64_t
-#define RADIX_SORT_TYPE uint32_t
+using RADIX_SORT_KEY_TYPE = uint64_t;
+// using RADIX_SORT_KEY_TYPE = uint32_t;
+using RADIX_SORT_VALUE_TYPE = uint32_t;
 
-#define RADIX_SORT_VALUE_TYPE uint32_t
+#define KEY_PAIR 1
 
 int main()
 {
@@ -49,7 +49,6 @@ int main()
 		return 0;
 	}
 	int deviceIdx = 2;
-
 
 	oroError err;
 	err = oroInit( 0 );
@@ -70,7 +69,6 @@ int main()
 	printf( "Cuda: %s\n", isNvidia ? "Yes" : "No" );
 
 	{
-
 		std::vector<std::string> extraArgs;
 		if( isNvidia )
 		{
@@ -84,25 +82,14 @@ int main()
 			extraArgs.push_back( ARG_DEBINFO_AMD );
 		}
 		thrs::RadixSort::Config config;
-		switch (sizeof(RADIX_SORT_TYPE))
-		{
-		case 4:
-			config.keyType = thrs::KeyType::U32;
-			break;
-		case 8:
-			config.keyType = thrs::KeyType::U64;
-			break;
-		default:
-			THRS_ASSERT( 1 );
-		}
+		config.configureWithKeyPair<RADIX_SORT_KEY_TYPE, RADIX_SORT_VALUE_TYPE>();
 		thrs::RadixSort radixsort( extraArgs, config );
 
-		// Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
-		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );
-		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
-		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 );
-		//  std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
-		// std::vector<RADIX_SORT_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
+		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 );
+		std::vector<RADIX_SORT_KEY_TYPE> inputs( 160 * 1000 * 1000 );
+		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 );
+		//  std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 + 11 );
+		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
 
 		std::vector<RADIX_SORT_VALUE_TYPE> inputValues( inputs.size() );
 
@@ -110,15 +97,18 @@ int main()
 
 		uint32_t numberOfInputs = inputs.size();
 
-		std::unique_ptr<thrs::Buffer> inputKeyBuffer( new thrs::Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
+		std::unique_ptr<thrs::Buffer> inputKeyBuffer( new thrs::Buffer( sizeof( RADIX_SORT_KEY_TYPE ) * inputs.size() ) );
 		std::unique_ptr<thrs::Buffer> inputValueBuffer( new thrs::Buffer( sizeof( RADIX_SORT_VALUE_TYPE ) * inputValues.size() ) );
 
 		// column major
 		// +---- buckets ( 256 ) ----
 		// |
 		// blocks
-		// Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+#if defined( KEY_PAIR )
 		thrs::Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
+#else
+		thrs::Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+#endif
 		for (;;)
 		{
 			for( int i = 0; i < inputs.size(); i++ )
@@ -127,14 +117,17 @@ int main()
 				inputValues[i] = i;
 			}
 
-			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer->data(), inputs.data(), sizeof( RADIX_SORT_TYPE ) * inputs.size(), stream );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer->data(), inputs.data(), sizeof( RADIX_SORT_KEY_TYPE ) * inputs.size(), stream );
 			oroMemcpyHtoDAsync( (oroDeviceptr)inputValueBuffer->data(), inputValues.data(), sizeof( RADIX_SORT_VALUE_TYPE ) * inputValues.size(), stream );
 
 			OroStopwatch oroStream( stream );
 			oroStream.start();
 
-			// radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
-			radixsort.sortPairs( inputKeyBuffer->data(), inputValueBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
+#if defined( KEY_PAIR )
+			radixsort.sortPairs( inputKeyBuffer->data(), inputValueBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_KEY_TYPE ) * 8, stream );
+#else
+			radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_KEY_TYPE ) * 8, stream );
+#endif
 
 			oroStream.stop();
 			float ms = oroStream.getMs();
@@ -142,69 +135,39 @@ int main()
 
 			printf( "%f ms\n", ms );
 
-			std::vector<RADIX_SORT_TYPE> outputKeys( inputs.size() );
+			std::vector<RADIX_SORT_KEY_TYPE> outputKeys( inputs.size() );
 			std::vector<RADIX_SORT_VALUE_TYPE> outputValues( inputs.size() );
-			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer->data(), sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
+			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer->data(), sizeof( RADIX_SORT_KEY_TYPE ) * numberOfInputs );
 			oroMemcpyDtoH( outputValues.data(), (oroDeviceptr)inputValueBuffer->data(), sizeof( RADIX_SORT_VALUE_TYPE ) * numberOfInputs );
 
 			for( int i = 0; i < outputKeys.size() - 1; i++ )
 			{
-				SH_ASSERT( outputKeys[i] <= outputKeys[i + 1] );
+				THRS_ASSERT( outputKeys[i] <= outputKeys[i + 1] );
 			}
 
-#if 0
-			std::sort( inputs.begin(), inputs.end() );
-			for( int i = 0; i < outputs.size(); i++ )
-			{
-				SH_ASSERT( outputs[i] == inputs[i] );
-			}
-#else
-			std::vector<std::pair<RADIX_SORT_TYPE, uint32_t>> pairs( inputs.size() );
+#if defined( KEY_PAIR )
+			std::vector<std::pair<RADIX_SORT_KEY_TYPE, uint32_t>> pairs( inputs.size() );
 			for( int i = 0; i < inputs.size(); i++ )
 			{
 				pairs[i].first = inputs[i];
 				pairs[i].second = inputValues[i];
 			}
-			std::stable_sort(pairs.begin(), pairs.end(), [](std::pair<RADIX_SORT_TYPE, uint32_t> a, std::pair<RADIX_SORT_TYPE, uint32_t> b ) {
+			std::stable_sort(pairs.begin(), pairs.end(), [](std::pair<RADIX_SORT_KEY_TYPE, uint32_t> a, std::pair<RADIX_SORT_KEY_TYPE, uint32_t> b ) {
 				return a.first < b.first;
 			});
 			for( int i = 0; i < outputKeys.size(); i++ )
 			{
-				SH_ASSERT( outputKeys[i] == pairs[i].first );
-				SH_ASSERT( outputValues[i] == pairs[i].second );
+				THRS_ASSERT( outputKeys[i] == pairs[i].first );
+				THRS_ASSERT( outputValues[i] == pairs[i].second );
+			}
+#else
+			std::sort( inputs.begin(), inputs.end() );
+			for( int i = 0; i < outputKeys.size(); i++ )
+			{
+				THRS_ASSERT( outputKeys[i] == inputs[i] );
 			}
 #endif
 		}
-		
-		//std::vector<uint32_t> counterBufferRef( 256 * numberOfBlocks );
-		//for( int i = 0; i < inputs.size(); i += RADIX_SORT_BLOCK_SIZE )
-		//{
-		//	for( int j = 0; j < RADIX_SORT_BLOCK_SIZE; j++ )
-		//	{
-		//		int bitLocation = 0;
-		//		uint64_t item = inputs[i + j];
-		//		uint32_t bits = ( item >> bitLocation ) & 0xFF;
-
-		//		int bucketIndex = bits;
-		//		int blockIndex = i / RADIX_SORT_BLOCK_SIZE;
-		//		uint64_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
-		//		counterBufferRef[counterIndex]++;
-		//	}
-		//}
-
-		//std::vector<uint32_t> counterBufferFromGPU( 256 * numberOfBlocks );
-		//oroMemcpyDtoH( counterBufferFromGPU.data(), (oroDeviceptr)counterBuffer.data(), sizeof( uint32_t ) * 256 * numberOfBlocks );
-
-		////for (int i = 0; i < counterBufferRef.size(); i++)
-		////{
-		////	SH_ASSERT( counterBufferRef[i] == counterBufferFromGPU[i] );
-		////}
-
-
-		//std::vector<uint32_t> counterPrefixSumBufferFromGPU( 256 * numberOfBlocks );
-		//oroMemcpyDtoH( counterPrefixSumBufferFromGPU.data(), (oroDeviceptr)counterPrefixSumBuffer.data(), sizeof( uint32_t ) * 256 * numberOfBlocks );
-
-		//printf( "counterPrefixSumBufferFromGPU" );
 	}
 
 	oroCtxDestroy( ctx );

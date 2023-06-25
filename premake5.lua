@@ -87,7 +87,7 @@ project "main"
     flags { "MultiProcessorCompile", "NoPCH" }
 
     -- Src
-    files { "main.cpp", "shader.hpp", "kernel.cu", "tinyhipradixsort.hpp" }
+    files { "main.cpp", "kernel.cu", "tinyhipradixsort.hpp" }
 
     -- Orochi
     includedirs { "libs/orochi" }
