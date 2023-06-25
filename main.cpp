@@ -37,6 +37,8 @@ struct splitmix64
 // #define RADIX_SORT_TYPE uint64_t
 #define RADIX_SORT_TYPE uint32_t
 
+#define RADIX_SORT_VALUE_TYPE uint32_t
+
 int main()
 {
 	if( oroInitialize( (oroApi)( ORO_API_HIP | ORO_API_CUDA ), 0 ) )
@@ -45,6 +47,7 @@ int main()
 		return 0;
 	}
 	int deviceIdx = 2;
+
 
 	oroError err;
 	err = oroInit( 0 );
@@ -94,35 +97,42 @@ int main()
 
 		// Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );
-		//  std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
+		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 );
-		std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
+		//  std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
+
+		std::vector<RADIX_SORT_VALUE_TYPE> inputValues( inputs.size() );
+
 		splitmix64 rng;
 
 		uint32_t numberOfInputs = inputs.size();
 
 		std::unique_ptr<Buffer> inputKeyBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
+		std::unique_ptr<Buffer> inputValueBuffer( new Buffer( sizeof( RADIX_SORT_VALUE_TYPE ) * inputValues.size() ) );
 
 		// column major
 		// +---- buckets ( 256 ) ----
 		// |
 		// blocks
-		Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
-
+		// Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+		Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
 		for (;;)
 		{
 			for( int i = 0; i < inputs.size(); i++ )
 			{
 				inputs[i] = rng.next();
+				inputValues[i] = i;
 			}
 
 			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer->data(), inputs.data(), sizeof( RADIX_SORT_TYPE ) * inputs.size(), stream );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputValueBuffer->data(), inputValues.data(), sizeof( RADIX_SORT_VALUE_TYPE ) * inputValues.size(), stream );
 
 			OroStopwatch oroStream( stream );
 			oroStream.start();
 
-			radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
+			// radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
+			radixsort.sortPairs( inputKeyBuffer->data(), inputValueBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
 
 			oroStream.stop();
 			float ms = oroStream.getMs();
@@ -130,20 +140,38 @@ int main()
 
 			printf( "%f ms\n", ms );
 
-			std::vector<RADIX_SORT_TYPE> outputs( inputs.size() );
-			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)inputKeyBuffer->data(), sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
+			std::vector<RADIX_SORT_TYPE> outputKeys( inputs.size() );
+			std::vector<RADIX_SORT_VALUE_TYPE> outputValues( inputs.size() );
+			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer->data(), sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
+			oroMemcpyDtoH( outputValues.data(), (oroDeviceptr)inputValueBuffer->data(), sizeof( RADIX_SORT_VALUE_TYPE ) * numberOfInputs );
 
-			for (int i = 0; i < outputs.size() - 1; i++)
+			for( int i = 0; i < outputKeys.size() - 1; i++ )
 			{
-				SH_ASSERT( outputs[i] <= outputs[i + 1] );
+				SH_ASSERT( outputKeys[i] <= outputKeys[i + 1] );
 			}
-			Stopwatch sw;
+
+#if 0
 			std::sort( inputs.begin(), inputs.end() );
-			printf( "cpu %f ms,  %lld\n", sw.elapsed() * 1000.0, inputs[0] );
 			for( int i = 0; i < outputs.size(); i++ )
 			{
 				SH_ASSERT( outputs[i] == inputs[i] );
 			}
+#else
+			std::vector<std::pair<RADIX_SORT_TYPE, uint32_t>> pairs( inputs.size() );
+			for( int i = 0; i < inputs.size(); i++ )
+			{
+				pairs[i].first = inputs[i];
+				pairs[i].second = inputValues[i];
+			}
+			std::stable_sort(pairs.begin(), pairs.end(), [](std::pair<RADIX_SORT_TYPE, uint32_t> a, std::pair<RADIX_SORT_TYPE, uint32_t> b ) {
+				return a.first < b.first;
+			});
+			for( int i = 0; i < outputKeys.size(); i++ )
+			{
+				SH_ASSERT( outputKeys[i] == pairs[i].first );
+				SH_ASSERT( outputValues[i] == pairs[i].second );
+			}
+#endif
 		}
 		
 		//std::vector<uint32_t> counterBufferRef( 256 * numberOfBlocks );

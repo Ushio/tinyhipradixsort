@@ -209,10 +209,13 @@ namespace thrs
             switch( m_config.valueType )
 			{
 			case ValueType::U32:
+				extraArgs.push_back( std::string( "-DRADIX_SORT_VALUE_TYPE=uint32_t" ) );
 				break;
 			case ValueType::U64:
+				extraArgs.push_back( std::string( "-DRADIX_SORT_VALUE_TYPE=uint64_t" ) );
 				break;
 			case ValueType::U128:
+				extraArgs.push_back( std::string( "-DRADIX_SORT_VALUE_TYPE=uint4" ) );
 				break;
 			}
 			m_shader = std::unique_ptr<Shader>( new Shader( "../kernel.cu", "kernel.cu", extraArgs ) );
@@ -263,72 +266,14 @@ namespace thrs
 
 		void sortKeys( void* inputKeyBuffer, uint32_t numberOfInputs, void* temporaryBuffer, int startBits, int endBits, oroStream stream )
         {
-			THRS_ASSERT( ( ( endBits - startBits ) % 8 ) == 0 );
-
-			// Buffers
-			TemporaryBufferDef def = getTemporaryBufferBytes( numberOfInputs );
-			void* pSumBuffer = temporaryBuffer;
-			void* outputKeyBuffer = (void*)( (uint8_t*)temporaryBuffer + def.pSumBuffer );
-
-			uint32_t numberOfBlocks = div_round_up( numberOfInputs, m_config.radixSortBlockSize );
-
-			for( int i = 0; ( startBits + i * 8 ) < endBits; i++ )
-			{
-				uint32_t bitLocation = startBits + i * 8;
-
-				// counter
-				{
-					ShaderArgument args;
-					args.add( inputKeyBuffer );
-					args.add( numberOfInputs );
-					args.add( temporaryBuffer );
-					args.add( bitLocation );
-					m_shader->launch( "blockCount", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
-				}
-				// Prefix Sum
-				{
-					// OroStopwatch oroStream( stream );
-					// oroStream.start();
-
-					ShaderArgument args;
-					args.add( temporaryBuffer );
-					args.add( numberOfBlocks * 256 );
-					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, m_config.prefixScanBlockSize ), 1, 1, 32, 1, 1, stream );
-
-					// oroStream.stop();
-					// float ms = oroStream.getMs();
-					// oroStreamSynchronize( stream );
-
-					// printf( "pSum %f ms\n", ms );
-				}
-				// reorder
-				{
-					// OroStopwatch oroStream( stream );
-					// oroStream.start();
-
-					ShaderArgument args;
-					args.add( inputKeyBuffer );
-					args.add( outputKeyBuffer );
-					args.add( numberOfInputs );
-					args.add( temporaryBuffer );
-					args.add( bitLocation );
-
-					m_shader->launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
-
-					// oroStream.stop();
-					// float ms = oroStream.getMs();
-					// oroStreamSynchronize( stream );
-
-					// printf( "reorder %f ms\n", ms );
-				}
-
-				std::swap( inputKeyBuffer, outputKeyBuffer );
-			}
-
-			// todo odd case.
+			sort( inputKeyBuffer, nullptr, false, numberOfInputs, temporaryBuffer, startBits, endBits, stream );
         }
-
-		void sortKeys( void* inputKeyBuffer, void* inputValueBuffer, uint32_t numberOfInputs, void* temporaryBuffer, int startBits, int endBits, oroStream stream )
+		void sortPairs( void* inputKeyBuffer, void* inputValueBuffer, uint32_t numberOfInputs, void* temporaryBuffer, int startBits, int endBits, oroStream stream )
+		{
+			sort( inputKeyBuffer, inputValueBuffer, true, numberOfInputs, temporaryBuffer, startBits, endBits, stream );
+		}
+	private:
+		void sort( void* inputKeyBuffer, void* inputValueBuffer, bool keyPair, uint32_t numberOfInputs, void* temporaryBuffer, int startBits, int endBits, oroStream stream )
 		{
 			THRS_ASSERT( ( ( endBits - startBits ) % 8 ) == 0 );
 
@@ -374,14 +319,28 @@ namespace thrs
 					// OroStopwatch oroStream( stream );
 					// oroStream.start();
 
-					ShaderArgument args;
-					args.add( inputKeyBuffer );
-					args.add( outputKeyBuffer );
-					args.add( numberOfInputs );
-					args.add( temporaryBuffer );
-					args.add( bitLocation );
-
-					m_shader->launch( "reorder", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
+					if( keyPair )
+					{
+						ShaderArgument args;
+						args.add( inputKeyBuffer );
+						args.add( outputKeyBuffer );
+						args.add( inputValueBuffer );
+						args.add( outputValueBuffer );
+						args.add( numberOfInputs );
+						args.add( temporaryBuffer );
+						args.add( bitLocation );
+						m_shader->launch( "reorderKeyPair", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
+					}
+					else
+					{
+						ShaderArgument args;
+						args.add( inputKeyBuffer );
+						args.add( outputKeyBuffer );
+						args.add( numberOfInputs );
+						args.add( temporaryBuffer );
+						args.add( bitLocation );
+						m_shader->launch( "reorderKey", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
+					}
 
 					// oroStream.stop();
 					// float ms = oroStream.getMs();
@@ -389,8 +348,8 @@ namespace thrs
 
 					// printf( "reorder %f ms\n", ms );
 				}
-
 				std::swap( inputKeyBuffer, outputKeyBuffer );
+				std::swap( inputValueBuffer, outputValueBuffer );
 			}
 
 			// todo odd case.

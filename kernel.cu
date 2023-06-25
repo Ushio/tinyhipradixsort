@@ -134,7 +134,7 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 	}
 }
 
-extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_TYPE* outputs, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+__device__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_SORT_KEY_TYPE* outputKeys, RADIX_SORT_VALUE_TYPE* inputValues, RADIX_SORT_VALUE_TYPE* outputValues, bool keyPair, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
 #if 1
 	__shared__ uint32_t localPrefixSum[256];
@@ -152,7 +152,7 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		if( itemIndex < numberOfInputs )
 		{
-			auto item = inputs[itemIndex];
+			auto item = inputKeys[itemIndex];
 			uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 		}
@@ -183,7 +183,7 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
 		{
-			item = inputs[itemIndex];
+			item = inputKeys[itemIndex];
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
 
@@ -225,9 +225,11 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		RADIX_SORT_KEY_TYPE item;
 		uint32_t bucketIndex;
+		uint32_t srcIndex;
 		if( itemIndex < numberOfInputs )
 		{
-			item = inputs[blockIndex * RADIX_SORT_BLOCK_SIZE + elementIndices[i + threadIdx.x]];
+			srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + elementIndices[i + threadIdx.x];
+			item = inputKeys[srcIndex];
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
 
@@ -245,7 +247,11 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 			uint32_t lowerMask = ( 1u << threadIdx.x ) - 1;
 			uint32_t offset = __popc( matchMask & lowerMask );
 			uint32_t location = localPrefixSum[bucketIndex];
-			outputs[location + offset] = item;
+			outputKeys[location + offset] = item;
+			if( keyPair )
+			{
+				outputValues[location + offset] = inputValues[srcIndex];
+			}
 		}
 
 		__syncthreads();
@@ -257,7 +263,6 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 	}
 #else
 	__shared__ uint32_t psum[256];
-	__shared__ uint32_t matchMasks[256];
 
 	uint32_t blockIndex = blockIdx.x;
 	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
@@ -275,10 +280,10 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 		uint32_t bucketIndex;
 		if( itemIndex < numberOfInputs )
 		{
-			item = inputs[itemIndex];
+			item = inputKeys[itemIndex];
 			bucketIndex = ( item >> bitLocation ) & 0xFF;
 		}
-		uint32_t location = -1;
+		uint32_t location = 0xFFFFFFFF;
 		for( int j = 0; j < 32; j++ )
 		{
 			if( j == threadIdx.x )
@@ -290,10 +295,22 @@ extern "C" __global__ void reorder( RADIX_SORT_KEY_TYPE* inputs, RADIX_SORT_KEY_
 			}
 			__syncthreads();
 		}
-		if( location != -1 )
+		if( location != 0xFFFFFFFF )
 		{
-			outputs[location] = item;
+			outputKeys[location] = item;
+			if( keyPair )
+			{
+				outputValues[location] = inputValues[itemIndex];
+			}
 		}
 	}
 #endif
+}
+extern "C" __global__ void reorderKey( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_SORT_KEY_TYPE* outputKeys, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+{
+	reorder( inputKeys, outputKeys, nullptr, nullptr, false, numberOfInputs, sums, bitLocation );
+}
+extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_SORT_KEY_TYPE* outputKeys, RADIX_SORT_VALUE_TYPE* inputValues, RADIX_SORT_VALUE_TYPE* outputValues, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
+{
+	reorder( inputKeys, outputKeys, inputValues, outputValues, true, numberOfInputs, sums, bitLocation );
 }
