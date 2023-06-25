@@ -34,8 +34,8 @@ struct splitmix64
 	}
 };
 
-//#define RADIX_SORT_TYPE uint64_t
-#define RADIX_SORT_TYPE uint32_t
+#define RADIX_SORT_TYPE uint64_t
+//#define RADIX_SORT_TYPE uint32_t
 
 int main()
 {
@@ -82,10 +82,10 @@ int main()
 		switch (sizeof(RADIX_SORT_TYPE))
 		{
 		case 4:
-			config.keyType == thrs::KeyType::U32;
+			config.keyType = thrs::KeyType::U32;
 			break;
 		case 8:
-			config.keyType == thrs::KeyType::U64;
+			config.keyType = thrs::KeyType::U64;
 			break;
 		default:
 			THRS_ASSERT( 1 );
@@ -115,7 +115,7 @@ int main()
 		{
 			for( int i = 0; i < inputs.size(); i++ )
 			{
-				inputs[i] = rng.next() & 0xFFFFFFFF;
+				inputs[i] = rng.next();
 			}
 
 			oroMemcpyHtoDAsync( (oroDeviceptr)inputsBuffer->data(), inputs.data(), sizeof( RADIX_SORT_TYPE ) * inputs.size(), stream );
@@ -123,7 +123,7 @@ int main()
 			OroStopwatch oroStream( stream );
 			oroStream.start();
 
-			void* output = radixsort.sortKeys( inputsBuffer->data(), outputsBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, 32, stream );
+			void* output = radixsort.sortKeys( inputsBuffer->data(), outputsBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
 
 			oroStream.stop();
 			float ms = oroStream.getMs();
