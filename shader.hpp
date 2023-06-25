@@ -8,33 +8,6 @@
 #include <intrin.h>
 #define SH_ASSERT(ExpectTrue) if((ExpectTrue) == 0) { __debugbreak(); }
 
-class Buffer
-{
-public:
-	Buffer( const Buffer& ) = delete;
-	void operator=( const Buffer& ) = delete;
-
-	Buffer( int64_t bytes )
-		: m_bytes( std::max( bytes, 1LL ) )
-	{
-		oroMalloc( &m_ptr, m_bytes );
-	}
-	~Buffer()
-	{
-		oroFree( m_ptr );
-	}
-	int64_t bytes() const
-	{
-		return m_bytes;
-	}
-	char* data()
-	{
-		return (char*)m_ptr;
-	}
-private:
-	int64_t m_bytes;
-	oroDeviceptr m_ptr;
-};
 
 enum class CompileMode
 {
@@ -164,6 +137,10 @@ public:
 
 		std::vector<char> codec( codeSize );
 		orortcGetCode( program, codec.data() );
+
+		FILE* fp = fopen( "shader.bin", "wb" );
+		fwrite( codec.data(), codec.size(), 1, fp );
+		fclose( fp );
 
 		orortcDestroyProgram( &program );
 

@@ -110,15 +110,15 @@ int main()
 
 		uint32_t numberOfInputs = inputs.size();
 
-		std::unique_ptr<Buffer> inputKeyBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
-		std::unique_ptr<Buffer> inputValueBuffer( new Buffer( sizeof( RADIX_SORT_VALUE_TYPE ) * inputValues.size() ) );
+		std::unique_ptr<thrs::Buffer> inputKeyBuffer( new thrs::Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
+		std::unique_ptr<thrs::Buffer> inputValueBuffer( new thrs::Buffer( sizeof( RADIX_SORT_VALUE_TYPE ) * inputValues.size() ) );
 
 		// column major
 		// +---- buckets ( 256 ) ----
 		// |
 		// blocks
 		// Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
-		Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
+		thrs::Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
 		for (;;)
 		{
 			for( int i = 0; i < inputs.size(); i++ )

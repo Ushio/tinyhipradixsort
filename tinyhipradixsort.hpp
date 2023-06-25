@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <map>
 #include <inttypes.h>
 #include <Orochi/Orochi.h>
 
@@ -358,6 +359,34 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 	    fclose( fp );
 	    fp = nullptr;
     }
+	class Buffer
+	{
+	public:
+		Buffer( const Buffer& ) = delete;
+		void operator=( const Buffer& ) = delete;
+
+		Buffer( int64_t bytes )
+			: m_bytes( std::max( bytes, 1LL ) )
+		{
+			oroMalloc( &m_ptr, m_bytes );
+		}
+		~Buffer()
+		{
+			oroFree( m_ptr );
+		}
+		int64_t bytes() const
+		{
+			return m_bytes;
+		}
+		char* data()
+		{
+			return (char*)m_ptr;
+		}
+
+	private:
+		int64_t m_bytes;
+		oroDeviceptr m_ptr;
+	};
 
     struct ShaderArgument
     {
@@ -498,6 +527,42 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
             int prefixScanBlockSize = 8192;
             KeyType keyType = KeyType::U32;
             ValueType valueType = ValueType::U32;
+
+			template <class KEY>
+			void configureWithKey()
+			{
+				static_assert( sizeof( KEY ) == 4 || sizeof( KEY ) == 8, "" );
+
+				switch( sizeof( KEY ) )
+				{
+				case 4:
+					keyType = KeyType::U32;
+					break;
+				case 8:
+					keyType = KeyType::U64;
+					break;
+				}
+			}
+			template <class KEY, class VALUE>
+			void configureWithKeyPair()
+			{
+				configureWithKey<KEY>();
+
+				static_assert( sizeof( VALUE ) == 4 || sizeof( VALUE ) == 8 || sizeof( VALUE ) == 16, "" );
+
+				switch( sizeof( VALUE ) )
+				{
+				case 4:
+					valueType = ValueType::U32;
+					break;
+				case 8:
+					valueType = ValueType::U64;
+					break;
+				case 16:
+					valueType = ValueType::U128;
+					break;
+				}
+			}
         };
 
 		RadixSort( std::vector<std::string> extraArgs, const Config& config = Config() )
@@ -562,6 +627,18 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			{
 				return pSumBuffer + keyOutBuffer + valueOutBuffer;
 			}
+			void* getPSumBuffer( void* p ) const
+			{
+				return p;
+			}
+			void* getOutputKeyBuffer( void* p ) const
+			{
+				return (void*)( (uint8_t*)p + pSumBuffer );
+			}
+			void* getOutputValueBuffer( void* p ) const
+			{
+				return (void*)( (uint8_t*)p + pSumBuffer + keyOutBuffer );
+			}
 		};
 		TemporaryBufferDef getTemporaryBufferBytes( uint32_t numberOfMaxInputs ) const
         {
@@ -587,7 +664,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 				valueBytes = sizeof( uint32_t ) * 4;
 				break;
 			}
-			def.valueOutBuffer = next_multiple( keyBytes * numberOfMaxInputs, alignment );
+			def.valueOutBuffer = next_multiple( valueBytes * numberOfMaxInputs, alignment );
 			return def;
         }
 
@@ -606,9 +683,9 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 
 			// Buffers
 			TemporaryBufferDef def = getTemporaryBufferBytes( numberOfInputs );
-			void* pSumBuffer = temporaryBuffer;
-			void* outputKeyBuffer = (void*)( (uint8_t*)temporaryBuffer + def.pSumBuffer );
-			void* outputValueBuffer = (void*)( (uint8_t*)temporaryBuffer + def.pSumBuffer + def.keyOutBuffer );
+			void* pSumBuffer = def.getPSumBuffer( temporaryBuffer );
+			void* outputKeyBuffer = def.getOutputKeyBuffer( temporaryBuffer );
+			void* outputValueBuffer = def.getOutputValueBuffer( temporaryBuffer );
 
 			uint32_t numberOfBlocks = div_round_up( numberOfInputs, m_config.radixSortBlockSize );
 
@@ -621,7 +698,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					ShaderArgument args;
 					args.add( inputKeyBuffer );
 					args.add( numberOfInputs );
-					args.add( temporaryBuffer );
+					args.add( pSumBuffer );
 					args.add( bitLocation );
 					m_shader->launch( "blockCount", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
 				}
@@ -631,7 +708,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					// oroStream.start();
 
 					ShaderArgument args;
-					args.add( temporaryBuffer );
+					args.add( pSumBuffer );
 					args.add( numberOfBlocks * 256 );
 					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, m_config.prefixScanBlockSize ), 1, 1, 32, 1, 1, stream );
 
@@ -654,7 +731,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 						args.add( inputValueBuffer );
 						args.add( outputValueBuffer );
 						args.add( numberOfInputs );
-						args.add( temporaryBuffer );
+						args.add( pSumBuffer );
 						args.add( bitLocation );
 						m_shader->launch( "reorderKeyPair", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
 					}
@@ -664,7 +741,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 						args.add( inputKeyBuffer );
 						args.add( outputKeyBuffer );
 						args.add( numberOfInputs );
-						args.add( temporaryBuffer );
+						args.add( pSumBuffer );
 						args.add( bitLocation );
 						m_shader->launch( "reorderKey", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
 					}
