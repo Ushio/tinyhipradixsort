@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <memory>
 #include "Orochi/OrochiUtils.h"
+
+#define THRS_KERNEL_FROM_FILE 1
 #include "tinyhipradixsort.hpp"
 
 class Stopwatch
