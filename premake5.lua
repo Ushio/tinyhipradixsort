@@ -52,6 +52,15 @@ project "unittest"
     files { "libs/orochi/contrib/cuew/src/cuew.cpp" }
     links { "version" }
 
+    -- Radix sort module 
+    includedirs { "libs/orochi/ParallelPrimitives" }
+    files { "libs/orochi/ParallelPrimitives/RadixSort.cpp" }
+    files { "libs/orochi/Orochi/OrochiUtils.cpp" }
+    defines{"__WINDOWS__", "NOMINMAX"}
+    characterset ("ASCII")
+    links { "kernel32" }
+
+
     -- UTF8
     postbuildcommands { 
         "{COPYFILE} ../libs/orochi/contrib/bin/win64/*.dll ../bin"
