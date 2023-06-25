@@ -2,7 +2,7 @@
 // https://github.com/sheredom/utest.h
 
 #include <Orochi/Orochi.h>
-#define THRS_KERNEL_FROM_FILE 1
+//#define THRS_KERNEL_FROM_FILE 1
 #include "tinyhipradixsort.hpp"
 #include <functional>
 #include <algorithm>
@@ -23,7 +23,7 @@ struct splitmix64
 	}
 };
 
-int deviceIdx = 0;
+int deviceIdx = 2;
 oroDevice device;
 oroStream stream;
 oroCtx ctx;
@@ -145,7 +145,7 @@ void testSortPairs( std::function<void(bool)> assertion )
 
 		for( int i = 0; i < inputValues.size(); i++ )
 		{
-			inputValues[i] = i;
+			inputValues[i] = ValueType( i );
 		}
 
 		thrs::Buffer inputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
@@ -206,6 +206,26 @@ UTEST( SortPairs, K64V64 )
 {
 	using KeyType = uint64_t;
 	using ValueType = uint64_t;
+	testSortPairs<KeyType, ValueType>( [&]( bool e )
+									   { ASSERT_TRUE( e ); } );
+}
+
+UTEST( SortPairs, K64V128 )
+{
+	struct u128
+	{
+		uint64_t a;
+		uint64_t b;
+		u128():a(0), b(0){}
+		u128( uint64_t x ) : a( x ), b( x ) {}
+		bool operator==(const u128& rhs) const
+		{
+			return a == rhs.a && b == rhs.b;
+		}
+	};
+
+	using KeyType = uint64_t;
+	using ValueType = u128;
 	testSortPairs<KeyType, ValueType>( [&]( bool e )
 									   { ASSERT_TRUE( e ); } );
 }
