@@ -15,6 +15,7 @@
 
 #define TEST_ITERATION 32
 #define TEST_MAX_ARRAY_SIZE 100000
+int deviceIdx = 2;
 
 struct splitmix64
 {
@@ -29,7 +30,6 @@ struct splitmix64
 	}
 };
 
-int deviceIdx = 2;
 oroDevice device;
 oroStream stream;
 oroCtx ctx;
