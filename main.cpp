@@ -34,8 +34,8 @@ struct splitmix64
 	}
 };
 
-#define RADIX_SORT_TYPE uint64_t
-//#define RADIX_SORT_TYPE uint32_t
+// #define RADIX_SORT_TYPE uint64_t
+#define RADIX_SORT_TYPE uint32_t
 
 int main()
 {
@@ -102,14 +102,13 @@ int main()
 
 		uint32_t numberOfInputs = inputs.size();
 
-		std::unique_ptr<Buffer> inputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
-		std::unique_ptr<Buffer> outputsBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
+		std::unique_ptr<Buffer> inputKeyBuffer( new Buffer( sizeof( RADIX_SORT_TYPE ) * inputs.size() ) );
 
 		// column major
 		// +---- buckets ( 256 ) ----
 		// |
 		// blocks
-		Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ) );
+		Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
 
 		for (;;)
 		{
@@ -118,12 +117,12 @@ int main()
 				inputs[i] = rng.next();
 			}
 
-			oroMemcpyHtoDAsync( (oroDeviceptr)inputsBuffer->data(), inputs.data(), sizeof( RADIX_SORT_TYPE ) * inputs.size(), stream );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer->data(), inputs.data(), sizeof( RADIX_SORT_TYPE ) * inputs.size(), stream );
 
 			OroStopwatch oroStream( stream );
 			oroStream.start();
 
-			void* output = radixsort.sortKeys( inputsBuffer->data(), outputsBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
+			radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_TYPE ) * 8, stream );
 
 			oroStream.stop();
 			float ms = oroStream.getMs();
@@ -132,7 +131,7 @@ int main()
 			printf( "%f ms\n", ms );
 
 			std::vector<RADIX_SORT_TYPE> outputs( inputs.size() );
-			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)output, sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
+			oroMemcpyDtoH( outputs.data(), (oroDeviceptr)inputKeyBuffer->data(), sizeof( RADIX_SORT_TYPE ) * numberOfInputs );
 
 			for (int i = 0; i < outputs.size() - 1; i++)
 			{
