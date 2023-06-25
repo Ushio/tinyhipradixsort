@@ -184,7 +184,7 @@ namespace thrs
             ValueType valueType = ValueType::U32;
         };
 
-		RadixSort( const char* kernelFile, std::vector<std::string> extraArgs, const Config& config = Config() )
+		RadixSort( std::vector<std::string> extraArgs, const Config& config = Config() )
         :m_config( config )
         {
             // shader settings
@@ -212,8 +212,7 @@ namespace thrs
 			case ValueType::U256:
 				break;
 			}
-
-			m_shader = std::unique_ptr<Shader>( new Shader( kernelFile, "radixsort", extraArgs ) );
+			m_shader = std::unique_ptr<Shader>( new Shader( "../kernel.cu", "kernel.cu", extraArgs ) );
         }
 		uint32_t getTemporaryBufferBytes( uint32_t numberOfInputs ) const
         {

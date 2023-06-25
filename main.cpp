@@ -73,7 +73,6 @@ int main()
 	printf( "Cuda: %s\n", isNvidia ? "Yes" : "No" );
 
 	{
-		std::string baseDir = "../"; /* repository root */
 
 		std::vector<std::string> extraArgs;
 		if( isNvidia )
@@ -88,12 +87,13 @@ int main()
 			extraArgs.push_back( ARG_DEBINFO_AMD );
 		}
 
-		thrs::RadixSort radixsort( ( baseDir + "\\kernel.cu" ).c_str(), extraArgs );
+		thrs::RadixSort radixsort( extraArgs );
 
 		// Shader shader( ( baseDir + "\\kernel.cu" ).c_str(), "kernel.cu", { baseDir }, {}, CompileMode::RelwithDebInfo, isNvidia );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024 );
-		std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
-		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
+		//  std::vector<RADIX_SORT_TYPE> inputs( 160 * 1000 * 1000 );
+		// std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 );
+		std::vector<RADIX_SORT_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 		// std::vector<RADIX_SORT_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
 		splitmix64 rng;
 
