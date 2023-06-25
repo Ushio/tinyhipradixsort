@@ -10,6 +10,8 @@
 #include <ParallelPrimitives/RadixSort.h>
 #include <ParallelPrimitives/RadixSortConfigs.h>
 
+#include <ppl.h>
+
 #include "utest.h"
 // https://github.com/sheredom/utest.h
 
@@ -429,5 +431,36 @@ UTEST( OrochiRadixSort, bench )
 			}
 #endif
 		}
+	}
+}
+
+UTEST( SortKeys, u32Large )
+{
+	using KeyType = uint32_t;
+	thrs::RadixSort::Config config;
+	config.configureWithKey<KeyType>();
+	thrs::RadixSort radixsort( extraArgs, config );
+
+	splitmix64 rng;
+	uint32_t numberOfInputs = 1024llu * 1024 * 1024 * 2 + 100;
+	thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+	std::vector<KeyType> inputKeys( numberOfInputs );
+	randomizeValues( &rng, &inputKeys );
+
+	thrs::Buffer inputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
+	oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer.data(), inputKeys.data(), sizeof( KeyType ) * inputKeys.size(), stream );
+
+	radixsort.sortKeys( inputKeyBuffer.data(), numberOfInputs, tmpBuffer.data(), 0, sizeof( KeyType ) * 8, stream );
+
+	oroStreamSynchronize( stream );
+
+	std::vector<KeyType> outputKeys( inputKeys.size() );
+	oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
+
+	concurrency::parallel_sort( inputKeys.begin(), inputKeys.end() );
+
+	for( int i = 0; i < inputKeys.size(); i++ )
+	{
+		ASSERT_TRUE( inputKeys[i] == outputKeys[i] );
 	}
 }

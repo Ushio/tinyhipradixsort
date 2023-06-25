@@ -508,7 +508,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
         U64,
         U128,
     };
-	inline int bytesOf( KeyType valueType )
+	inline uint64_t bytesOf( KeyType valueType )
 	{
 		switch( valueType )
 		{
@@ -520,7 +520,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 		THRS_ASSERT( 0 );
 		return 0;
 	}
-	inline int bytesOf( ValueType valueType )
+	inline uint64_t bytesOf( ValueType valueType )
 	{
 		switch( valueType )
 		{
@@ -536,13 +536,13 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 	}
 
 
-    inline uint32_t div_round_up( uint32_t val, uint32_t divisor )
+    inline uint64_t div_round_up64( uint64_t val, uint64_t divisor )
 	{
 		return ( val + divisor - 1 ) / divisor;
 	}
-	inline uint32_t next_multiple( uint32_t val, uint32_t divisor )
+	inline uint64_t next_multiple64( uint64_t val, uint64_t divisor )
 	{
-		return div_round_up( val, divisor ) * divisor;
+		return div_round_up64( val, divisor ) * divisor;
 	}
 
     class RadixSort
@@ -672,10 +672,10 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			const int alignment = 16;
 
 			TemporaryBufferDef def = {};
-			uint64_t numberOfBlocks = div_round_up( numberOfMaxInputs, m_config.radixSortBlockSize );
-			def.pSumBuffer = next_multiple( sizeof( uint32_t ) * 256 * numberOfBlocks, alignment );
-			def.keyOutBuffer = next_multiple( bytesOf( m_config.keyType ) * numberOfMaxInputs, alignment );
-			def.valueOutBuffer = next_multiple( bytesOf( m_config.valueType ) * numberOfMaxInputs, alignment );
+			uint64_t numberOfBlocks = div_round_up64( numberOfMaxInputs, m_config.radixSortBlockSize );
+			def.pSumBuffer = next_multiple64( sizeof( uint32_t ) * 256 * numberOfBlocks, alignment );
+			def.keyOutBuffer = next_multiple64( bytesOf( m_config.keyType ) * numberOfMaxInputs, alignment );
+			def.valueOutBuffer = next_multiple64( bytesOf( m_config.valueType ) * numberOfMaxInputs, alignment );
 			return def;
         }
 
@@ -698,7 +698,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			void* outputKeyBuffer = def.getOutputKeyBuffer( temporaryBuffer );
 			void* outputValueBuffer = def.getOutputValueBuffer( temporaryBuffer );
 
-			uint32_t numberOfBlocks = div_round_up( numberOfInputs, m_config.radixSortBlockSize );
+			uint32_t numberOfBlocks = div_round_up64( numberOfInputs, m_config.radixSortBlockSize );
 
 			int iteration = 0;
 			for( int i = 0; ( startBits + i * 8 ) < endBits; i++ )
@@ -722,7 +722,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					ShaderArgument args;
 					args.add( pSumBuffer );
 					args.add( numberOfBlocks * 256 );
-					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up( numberOfBlocks * 256, m_config.prefixScanBlockSize ), 1, 1, 32, 1, 1, stream );
+					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up64( numberOfBlocks * 256, m_config.prefixScanBlockSize ), 1, 1, 32, 1, 1, stream );
 
 					// oroStream.stop();
 					// float ms = oroStream.getMs();
@@ -772,10 +772,10 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 
 			if( (iteration % 2) == 1 )
 			{
-				oroMemcpyDtoD( (oroDeviceptr)outputKeyBuffer, (oroDeviceptr)inputKeyBuffer, (uint64_t)bytesOf( m_config.keyType ) * numberOfInputs );
+				oroMemcpyDtoD( (oroDeviceptr)outputKeyBuffer, (oroDeviceptr)inputKeyBuffer, bytesOf( m_config.keyType ) * numberOfInputs );
 				if( keyPair )
 				{
-					oroMemcpyDtoD( (oroDeviceptr)outputValueBuffer, (oroDeviceptr)inputValueBuffer, (uint64_t)bytesOf( m_config.valueType ) * numberOfInputs );
+					oroMemcpyDtoD( (oroDeviceptr)outputValueBuffer, (oroDeviceptr)inputValueBuffer, bytesOf( m_config.valueType ) * numberOfInputs );
 				}
 			}
 		}
