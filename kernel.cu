@@ -3,6 +3,9 @@ typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
+#define RADIX_SORT_BLOCK_SIZE 2048
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
+
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 

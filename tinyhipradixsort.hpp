@@ -15,6 +15,9 @@
 
 //#define THRS_KERNEL_FROM_FILE 1
 
+#define RADIX_SORT_BLOCK_SIZE 2048
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
+
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
@@ -24,9 +27,15 @@
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
 
-static_assert( BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK <= 256, "" );
+// some checks for simplicity
+static_assert( BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK <= 256, "please check clearShared, etc" );
+static_assert( ( RADIX_SORT_BLOCK_SIZE % BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ) == 0, "you may need some adjustments on blockCount" );
+
 static_assert( PSUM_NUMBER_OF_THREADS_PER_BLOCK <= 1024, "" );
-static_assert( REORDER_NUMBER_OF_THREADS_PER_BLOCK <= 256, "" );
+static_assert( ( RADIX_SORT_PREFIX_SCAN_BLOCK % PSUM_NUMBER_OF_THREADS_PER_BLOCK ) == 0, "you may need some adjustments on prefixSumExclusiveInplace" );
+
+static_assert( REORDER_NUMBER_OF_THREADS_PER_BLOCK <= 256, "please check clearShared, etc" );
+static_assert( ( RADIX_SORT_BLOCK_SIZE % REORDER_NUMBER_OF_THREADS_PER_BLOCK ) == 0, "you may need some adjustments on reorder" );
 
 namespace thrs
 {
@@ -35,6 +44,9 @@ typedef unsigned long long uint64_t;
 typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
+
+#define RADIX_SORT_BLOCK_SIZE 2048
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
@@ -607,8 +619,6 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
     public:
         struct Config
         {
-            int radixSortBlockSize = 2048;
-            int prefixScanBlockSize = 8192;
             KeyType keyType = KeyType::U32;
             ValueType valueType = ValueType::U32;
 
@@ -652,15 +662,6 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 		RadixSort( std::vector<std::string> extraArgs, const Config& config = Config() )
         :m_config( config )
         {
-			THRS_ASSERT( 32 <= config.radixSortBlockSize );
-			THRS_ASSERT( ( config.radixSortBlockSize % 32 ) == 0 );
-			THRS_ASSERT( 32 <= config.prefixScanBlockSize );
-			THRS_ASSERT( ( config.prefixScanBlockSize % 32 ) == 0 );
-
-            // shader settings
-			extraArgs.push_back( std::string( "-DRADIX_SORT_BLOCK_SIZE=" ) + std::to_string( m_config.radixSortBlockSize ) );
-			extraArgs.push_back( std::string( "-DRADIX_SORT_PREFIX_SCAN_BLOCK=" ) + std::to_string( m_config.prefixScanBlockSize ) );
-
             switch( m_config.keyType )
             {
 			case KeyType::U32:
@@ -729,7 +730,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			const int alignment = 16;
 
 			TemporaryBufferDef def = {};
-			uint64_t numberOfBlocks = div_round_up64( numberOfMaxInputs, m_config.radixSortBlockSize );
+			uint64_t numberOfBlocks = div_round_up64( numberOfMaxInputs, RADIX_SORT_BLOCK_SIZE );
 			def.pSumBuffer = next_multiple64( sizeof( uint32_t ) * 256 * numberOfBlocks, alignment );
 			def.keyOutBuffer = next_multiple64( bytesOf( m_config.keyType ) * numberOfMaxInputs, alignment );
 			def.valueOutBuffer = next_multiple64( bytesOf( m_config.valueType ) * numberOfMaxInputs, alignment );
@@ -755,7 +756,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			void* outputKeyBuffer = def.getOutputKeyBuffer( temporaryBuffer );
 			void* outputValueBuffer = def.getOutputValueBuffer( temporaryBuffer );
 
-			uint32_t numberOfBlocks = div_round_up64( numberOfInputs, m_config.radixSortBlockSize );
+			uint32_t numberOfBlocks = div_round_up64( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 
 			int iteration = 0;
 			for( int i = 0; ( startBits + i * 8 ) < endBits; i++ )
@@ -776,7 +777,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					ShaderArgument args;
 					args.add( pSumBuffer );
 					args.add( numberOfBlocks * 256 );
-					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up64( numberOfBlocks * 256, m_config.prefixScanBlockSize ), 1, 1, PSUM_NUMBER_OF_THREADS_PER_BLOCK, 1, 1, stream );
+					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, PSUM_NUMBER_OF_THREADS_PER_BLOCK, 1, 1, stream );
 				}
 				// reorder
 				{
