@@ -15,8 +15,14 @@
 
 //#define THRS_KERNEL_FROM_FILE 1
 
+#define BLOCK_COUNT_NUMBER_OF_WARPS 4
+#define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
+
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
+
+static_assert( BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK <= 256, "" );
+static_assert( REORDER_NUMBER_OF_THREADS_PER_BLOCK <= 256, "" );
 
 namespace thrs
 {
@@ -25,6 +31,13 @@ typedef unsigned long long uint64_t;
 typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
+
+#define BLOCK_COUNT_NUMBER_OF_WARPS 4
+#define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
+
+#define REORDER_NUMBER_OF_WARPS 8
+#define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
+
 
 #if defined( CUDART_VERSION ) && CUDART_VERSION >= 9000
 	#define ITS 1
@@ -51,10 +64,10 @@ __device__ uint64_t g_iterator;
 extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
-	clearShared<256, 32, uint32_t>( localCounters, 0 );
+	clearShared<256, BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( localCounters, 0 );
 	__syncthreads();
 
-	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += 32 )
+	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK )
 	{
 		uint32_t itemIndex = blockIdx.x * RADIX_SORT_BLOCK_SIZE + threadIdx.x + i;
 		if( itemIndex < numberOfInputs )
@@ -67,7 +80,7 @@ extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t num
 
 	__syncthreads();
 
-	for( int i = 0; i < 256; i += 32 )
+	for( int i = 0; i < 256; i += BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK )
 	{
 		uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 		uint32_t bucketIndex = i + threadIdx.x;
@@ -187,9 +200,6 @@ __device__ uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO )
 
 	return sum;
 }
-
-#define REORDER_NUMBER_OF_WARPS 8
-#define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
 
 __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_SORT_KEY_TYPE* outputKeys, RADIX_SORT_VALUE_TYPE* inputValues, RADIX_SORT_VALUE_TYPE* outputValues, bool keyPair, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
@@ -778,7 +788,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					args.add( numberOfInputs );
 					args.add( pSumBuffer );
 					args.add( bitLocation );
-					m_shader->launch( "blockCount", args, numberOfBlocks, 1, 1, 32, 1, 1, stream );
+					m_shader->launch( "blockCount", args, numberOfBlocks, 1, 1, BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK, 1, 1, stream );
 				}
 				// Prefix Sum
 				{
