@@ -86,7 +86,7 @@ int main()
 		config.configureWithKeyPair<RADIX_SORT_KEY_TYPE, RADIX_SORT_VALUE_TYPE>();
 		thrs::RadixSort radixsort( extraArgs, config );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 8192 * 128 + 1 );
-		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 );
+		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 8192 );
 		 std::vector<RADIX_SORT_KEY_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 );
 		//  std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 + 11 );

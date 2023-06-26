@@ -3,8 +3,11 @@ typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
-#define BLOCK_COUNT_NUMBER_OF_WARPS 4
+#define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
+
+#define PSUM_NUMBER_OF_WARPS 32
+#define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
@@ -64,83 +67,6 @@ extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t num
 		g_iterator = 0;
 }
 
-__device__ void warpPrefixSumExclusive( uint32_t val, uint32_t* p, uint32_t* sum )
-{
-	uint32_t x = val;
-
-	for( uint32_t offset = 1; offset < 32; offset <<= 1 )
-	{
-#if defined( ITS )
-		__syncwarp( 0xffffffff );
-		uint32_t y = __shfl_up_sync( 0xffffffff, x, offset );
-#else
-		uint32_t y = __shfl_up( x, offset );
-#endif
-
-		if( offset <= threadIdx.x )
-		{
-			x += y;
-		}
-	}
-#if defined( ITS )
-	__syncwarp( 0xffffffff );
-	*sum = __shfl_sync( 0xffffffff, x, 31 );
-#else
-	__syncthreads();
-	*sum = __shfl( x, 31 );
-#endif
-	*p = x - val;
-}
-
-extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs )
-{
-	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
-
-	uint32_t blockIndex = blockIdx.x;
-	uint32_t prefix = 0;
-	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += 32 )
-	{
-		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
-		uint32_t p;
-		uint32_t s;
-		warpPrefixSumExclusive( itemIndex < numberOfInputs ? inout[itemIndex] : 0, &p, &s );
-		localPrefixSum[i + threadIdx.x] = prefix + p;
-		prefix += s;
-	}
-
-	int gp;
-	if( threadIdx.x == 0 )
-	{
-		uint64_t expected;
-		uint64_t cur = g_iterator;
-		gp = cur & 0xFFFFFFFF;
-		do
-		{
-			expected = (uint64_t)gp + ( (uint64_t)( blockIndex ) << 32 );
-			uint64_t newValue = (uint64_t)gp + prefix | ( (uint64_t)( blockIndex + 1 ) << 32 );
-			cur = atomicCAS( &g_iterator, expected, newValue );
-			gp = cur & 0xFFFFFFFF;
-		} while( cur != expected );
-	}
-
-#if defined( ITS )
-	__syncwarp( 0xffffffff );
-	gp = __shfl_sync( 0xffffffff, gp, 0 );
-#else
-	__syncthreads();
-	gp = __shfl( gp, 0 );
-#endif
-
-	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += 32 )
-	{
-		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
-		if (itemIndex < numberOfInputs)
-		{
-			inout[itemIndex] = gp + localPrefixSum[i + threadIdx.x];
-		}
-	}
-}
-
 template <int NThreads>
 __device__ uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO )
 {
@@ -170,6 +96,57 @@ __device__ uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO )
 	__syncthreads();
 
 	return sum;
+}
+
+extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs )
+{
+	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
+	__shared__ uint32_t gp;
+
+	uint32_t blockIndex = blockIdx.x;
+	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += PSUM_NUMBER_OF_THREADS_PER_BLOCK )
+	{
+		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
+		localPrefixSum[i + threadIdx.x] = itemIndex < numberOfInputs ? inout[itemIndex] : 0;
+	}
+
+	__syncthreads();
+
+	uint32_t prefix = 0;
+	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += PSUM_NUMBER_OF_THREADS_PER_BLOCK )
+	{
+		prefix += prefixSumExclusive<PSUM_NUMBER_OF_THREADS_PER_BLOCK>( prefix, &localPrefixSum[i] );
+	}
+
+	if( threadIdx.x == 0 )
+	{
+		uint64_t expected;
+		uint64_t cur = g_iterator;
+		uint32_t globalPrefix = cur & 0xFFFFFFFF;
+		do
+		{
+			expected = (uint64_t)globalPrefix + ( (uint64_t)( blockIndex ) << 32 );
+			uint64_t newValue = (uint64_t)globalPrefix + prefix | ( (uint64_t)( blockIndex + 1 ) << 32 );
+			cur = atomicCAS( &g_iterator, expected, newValue );
+			globalPrefix = cur & 0xFFFFFFFF;
+
+		} while( cur != expected );
+
+		gp = globalPrefix;
+	}
+	__syncthreads();
+
+	uint32_t globalPrefix = gp;
+	__syncthreads();
+
+	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += PSUM_NUMBER_OF_THREADS_PER_BLOCK )
+	{
+		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
+		if( itemIndex < numberOfInputs )
+		{
+			inout[itemIndex] = globalPrefix + localPrefixSum[i + threadIdx.x];
+		}
+	}
 }
 
 __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_SORT_KEY_TYPE* outputKeys, RADIX_SORT_VALUE_TYPE* inputValues, RADIX_SORT_VALUE_TYPE* outputValues, bool keyPair, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )

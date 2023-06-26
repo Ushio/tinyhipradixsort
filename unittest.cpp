@@ -17,7 +17,7 @@
 
 #define TEST_ITERATION 128
 #define TEST_MAX_ARRAY_SIZE 100000
-int deviceIdx = 2;
+int deviceIdx = 0;
 
 struct splitmix64
 {
