@@ -15,7 +15,7 @@
 #include "utest.h"
 // https://github.com/sheredom/utest.h
 
-#define TEST_ITERATION 32
+#define TEST_ITERATION 128
 #define TEST_MAX_ARRAY_SIZE 100000
 int deviceIdx = 2;
 

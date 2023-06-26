@@ -6,6 +6,7 @@
 #define THRS_KERNEL_FROM_FILE 1
 #include "tinyhipradixsort.hpp"
 
+#include <ppl.h>
 class Stopwatch
 {
 public:
@@ -35,11 +36,11 @@ struct splitmix64
 	}
 };
 
-using RADIX_SORT_KEY_TYPE = uint64_t;
-// using RADIX_SORT_KEY_TYPE = uint32_t;
+// using RADIX_SORT_KEY_TYPE = uint64_t;
+using RADIX_SORT_KEY_TYPE = uint32_t;
 using RADIX_SORT_VALUE_TYPE = uint32_t;
 
-#define KEY_PAIR 1
+//#define KEY_PAIR 1
 
 int main()
 {
@@ -84,9 +85,9 @@ int main()
 		thrs::RadixSort::Config config;
 		config.configureWithKeyPair<RADIX_SORT_KEY_TYPE, RADIX_SORT_VALUE_TYPE>();
 		thrs::RadixSort radixsort( extraArgs, config );
-
+		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 8192 * 128 + 1 );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 );
-		std::vector<RADIX_SORT_KEY_TYPE> inputs( 160 * 1000 * 1000 );
+		 std::vector<RADIX_SORT_KEY_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 );
 		//  std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
@@ -161,7 +162,8 @@ int main()
 				THRS_ASSERT( outputValues[i] == pairs[i].second );
 			}
 #else
-			std::sort( inputs.begin(), inputs.end() );
+			concurrency::parallel_radixsort( inputs.begin(), inputs.end() );
+			// std::sort( inputs.begin(), inputs.end() );
 			for( int i = 0; i < outputKeys.size(); i++ )
 			{
 				THRS_ASSERT( outputKeys[i] == inputs[i] );
