@@ -204,7 +204,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 	};
 
 	__shared__ uint32_t localPrefixSum[256];
-	__shared__ uint32_t globalCounter[256];
+	__shared__ uint32_t counters[256];
 	__shared__ ElementLocation elementLocations[RADIX_SORT_BLOCK_SIZE];
 	__shared__ uint8_t elementBuckets[RADIX_SORT_BLOCK_SIZE];
 	__shared__ uint32_t matchMasks[REORDER_NUMBER_OF_WARPS][256];
@@ -213,7 +213,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
 
 	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( localPrefixSum, 0 );
-	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( globalCounter, 0 );
+	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( counters, 0 );
 
 	__syncthreads();
 
@@ -277,8 +277,8 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			{
 				offset += __popc( matchMasks[w][bucketIndex] );
 			}
-			uint32_t count = globalCounter[bucketIndex];
-			uint32_t location = localPrefixSum[bucketIndex];
+			uint32_t count = counters[bucketIndex];
+			uint32_t location = count + localPrefixSum[bucketIndex];
 
 			ElementLocation el;
 			el.localSrcIndex = i + threadIdx.x;
@@ -290,8 +290,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 
 		if( itemIndex < numberOfInputs )
 		{
-			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
-			atomicInc( &globalCounter[bucketIndex], 0xFFFFFFFF );
+			atomicInc( &counters[bucketIndex], 0xFFFFFFFF );
 		}
 		__syncthreads();
 	}
