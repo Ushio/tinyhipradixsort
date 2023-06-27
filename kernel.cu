@@ -155,10 +155,17 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_SORT_KEY_TYPE* outputKeys, RADIX_SORT_VALUE_TYPE* inputValues, RADIX_SORT_VALUE_TYPE* outputValues, bool keyPair, uint32_t numberOfInputs, uint32_t* sums, uint32_t bitLocation )
 {
 #if 1
+	struct ElementLocation
+	{
+		uint32_t localSrcIndex : 16;
+		uint32_t offsetGlobal : 16;
+	};
+
 	__shared__ uint32_t localPrefixSum[256];
-	__shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
+	// __shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
 	__shared__ uint32_t globalCounter[256];
-	__shared__ uint16_t elementOffsets[RADIX_SORT_BLOCK_SIZE];
+	//__shared__ uint16_t elementOffsets[RADIX_SORT_BLOCK_SIZE];
+	__shared__ ElementLocation elementLocations[RADIX_SORT_BLOCK_SIZE];
 	__shared__ uint32_t matchMasks[REORDER_NUMBER_OF_WARPS][256];
 
 	uint32_t blockIndex = blockIdx.x;
@@ -240,8 +247,11 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			}
 			uint32_t count = globalCounter[bucketIndex];
 			uint32_t location = localPrefixSum[bucketIndex];
-			elementIndices[location + offset] = i + threadIdx.x;
-			elementOffsets[location + offset] = count + offset;
+
+			ElementLocation el;
+			el.localSrcIndex = i + threadIdx.x;
+			el.offsetGlobal = count + offset;
+			elementLocations[location + offset] = el;
 		}
 
 		__syncthreads();
@@ -266,10 +276,11 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		if( itemIndex < numberOfInputs )
 		{
-			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + elementIndices[i + threadIdx.x];
+			ElementLocation el = elementLocations[i + threadIdx.x];
+			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
 			auto item = inputKeys[srcIndex];
 			auto bucketIndex = ( item >> bitLocation ) & 0xFF;
-			uint32_t dstIndex = localPrefixSum[bucketIndex] + elementOffsets[i + threadIdx.x];
+			uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
 			outputKeys[dstIndex] = item;
 			if( keyPair )
 			{
