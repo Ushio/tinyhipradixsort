@@ -157,8 +157,9 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 #if 1
 	struct ElementLocation
 	{
-		uint32_t localSrcIndex : 16;
-		uint32_t offsetGlobal : 16;
+		uint32_t localSrcIndex : 12;
+		uint32_t offsetGlobal : 12;
+		uint32_t bucket : 8;
 	};
 
 	__shared__ uint32_t localPrefixSum[256];
@@ -241,6 +242,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			ElementLocation el;
 			el.localSrcIndex = i + threadIdx.x;
 			el.offsetGlobal = count + offset;
+			el.bucket = bucketIndex;
 			elementLocations[location + offset] = el;
 		}
 
@@ -267,7 +269,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		{
 			ElementLocation el = elementLocations[i + threadIdx.x];
 			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
-			uint8_t bucketIndex = elementBuckets[el.localSrcIndex];
+			uint8_t bucketIndex = el.bucket;
 			
 			uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
 			outputKeys[dstIndex] = inputKeys[srcIndex];
