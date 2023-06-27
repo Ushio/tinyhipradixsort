@@ -162,21 +162,15 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 	};
 
 	__shared__ uint32_t localPrefixSum[256];
-	// __shared__ uint16_t elementIndices[RADIX_SORT_BLOCK_SIZE];
 	__shared__ uint32_t globalCounter[256];
-	//__shared__ uint16_t elementOffsets[RADIX_SORT_BLOCK_SIZE];
 	__shared__ ElementLocation elementLocations[RADIX_SORT_BLOCK_SIZE];
+	__shared__ uint8_t elementBuckets[RADIX_SORT_BLOCK_SIZE];
 	__shared__ uint32_t matchMasks[REORDER_NUMBER_OF_WARPS][256];
 
 	uint32_t blockIndex = blockIdx.x;
 	uint32_t numberOfBlocks = div_round_up( numberOfInputs, RADIX_SORT_BLOCK_SIZE );
-	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( localPrefixSum, 0 );
 
-	//for( int i = 0; i < 256; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
-	//{
-	//	uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
-	//	globalPrefixSum[i + threadIdx.x] = sums[counterIndex];
-	//}
+	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( localPrefixSum, 0 );
 	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( globalCounter, 0 );
 
 	__syncthreads();
@@ -190,6 +184,8 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			auto item = inputKeys[itemIndex];
 			uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
 			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
+
+			elementBuckets[i + threadIdx.x] = bucketIndex;
 		}
 	}
 
@@ -208,13 +204,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
 	{
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
-		RADIX_SORT_KEY_TYPE item;
-		uint32_t bucketIndex;
-		if( itemIndex < numberOfInputs )
-		{
-			item = inputKeys[itemIndex];
-			bucketIndex = ( item >> bitLocation ) & 0xFF;
-		}
+		uint32_t bucketIndex = elementBuckets[i + threadIdx.x];
 		
 		for( int w = 0; w < REORDER_NUMBER_OF_WARPS; w++ )
 		{
@@ -278,10 +268,10 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		{
 			ElementLocation el = elementLocations[i + threadIdx.x];
 			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
-			auto item = inputKeys[srcIndex];
-			auto bucketIndex = ( item >> bitLocation ) & 0xFF;
+			uint8_t bucketIndex = elementBuckets[el.localSrcIndex];
+			
 			uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
-			outputKeys[dstIndex] = item;
+			outputKeys[dstIndex] = inputKeys[srcIndex];
 			if( keyPair )
 			{
 				outputValues[dstIndex] = inputValues[srcIndex];
