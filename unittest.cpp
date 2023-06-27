@@ -382,11 +382,11 @@ UTEST( OrochiRadixSort, bench )
 			float ms = oroStream.getMs();
 			printf( "m_sort.sort %f ms\n", ms );
 
-#if 0
+#if 1
 			std::vector<KeyType> outputKeys( inputKeys.size() );
 			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)outputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
 
-			std::sort( inputKeys.begin(), inputKeys.end() );
+			concurrency::parallel_radixsort( inputKeys.begin(), inputKeys.end() );
 
 			for( int i = 0; i < inputKeys.size(); i++ )
 			{
@@ -419,11 +419,11 @@ UTEST( OrochiRadixSort, bench )
 			oroStream.stop();
 			float ms = oroStream.getMs();
 			printf( "radixsort.sortKeys %f ms\n", ms );
-#if 0
+#if 1
 			std::vector<KeyType> outputKeys( inputKeys.size() );
 			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
 
-			std::sort( inputKeys.begin(), inputKeys.end() );
+			concurrency::parallel_radixsort( inputKeys.begin(), inputKeys.end() );
 
 			for( int i = 0; i < inputKeys.size(); i++ )
 			{
