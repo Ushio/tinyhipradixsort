@@ -35,7 +35,7 @@ static_assert( PSUM_NUMBER_OF_THREADS_PER_BLOCK <= 1024, "" );
 static_assert( ( RADIX_SORT_PREFIX_SCAN_BLOCK % PSUM_NUMBER_OF_THREADS_PER_BLOCK ) == 0, "you may need some adjustments on prefixSumExclusiveInplace" );
 
 static_assert( REORDER_NUMBER_OF_THREADS_PER_BLOCK <= 256, "please check prefixSumExclusive, etc" );
-static_assert( ( RADIX_SORT_BLOCK_SIZE % REORDER_NUMBER_OF_THREADS_PER_BLOCK ) == 0, "you may need some adjustments on reorder" );
+static_assert( ( RADIX_SORT_BLOCK_SIZE % ( REORDER_NUMBER_OF_THREADS_PER_BLOCK * 4 ) ) == 0, "you may need some adjustments on reorder" );
 
 static_assert( RADIX_SORT_BLOCK_SIZE <= 4096 /* 2^12 */, "please check ElementLocation" );
 
