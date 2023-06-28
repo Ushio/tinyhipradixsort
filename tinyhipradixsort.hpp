@@ -222,16 +222,40 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 	__syncthreads();
 
 	// count
-	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
+#if defined( KEY_IS_16BYTE_ALIGNED )
+	if( ( blockIndex + 1 ) * RADIX_SORT_BLOCK_SIZE <= numberOfInputs )
 	{
-		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
-		if( itemIndex < numberOfInputs )
+		for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK * 4 )
 		{
-			auto item = inputKeys[itemIndex];
-			uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
-			atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
+			uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x * 4;
+			struct alignas( 16 ) Key4
+			{
+				RADIX_SORT_KEY_TYPE xs[4];
+			};
+			Key4 key4 = *(Key4 *)&inputKeys[itemIndex];
+			for (int k = 0; k < 4; k++)
+			{
+				auto item = key4.xs[k];
+				uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+				atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
+				elementBuckets[i + threadIdx.x * 4 + k] = bucketIndex;
+			}
+		}
+	}
+	else
+#endif
+	{
+		for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
+		{
+			uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+			if( itemIndex < numberOfInputs )
+			{
+				auto item = inputKeys[itemIndex];
+				uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+				atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 
-			elementBuckets[i + threadIdx.x] = bucketIndex;
+				elementBuckets[i + threadIdx.x] = bucketIndex;
+			}
 		}
 	}
 
@@ -594,6 +618,9 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
     public:
         struct Config
         {
+			// strongly recommended
+			bool keyIs16byteAligned = true;
+
             KeyType keyType = KeyType::U32;
             ValueType valueType = ValueType::U32;
 
@@ -659,7 +686,12 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 				extraArgs.push_back( std::string( "-DRADIX_SORT_VALUE_TYPE=uint4" ) );
 				break;
 			}
-			
+
+			if( m_config.keyIs16byteAligned )
+			{
+				extraArgs.push_back( std::string( "-DKEY_IS_16BYTE_ALIGNED=1" ) );
+			}
+
 #if defined( THRS_KERNEL_FROM_FILE )
 			std::vector<char> src;
 			loadFileAsVector( &src, "../kernel.cu" );
