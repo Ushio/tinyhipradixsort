@@ -339,16 +339,27 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			ElementLocation el = elementLocations[i + threadIdx.x];
 			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
 			uint8_t bucketIndex = el.bucket;
-			
+
 			uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
 			outputKeys[dstIndex] = inputKeys[srcIndex];
-			if( keyPair )
+		}
+	}
+	if( keyPair )
+	{
+		for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
+		{
+			uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
+			if( itemIndex < numberOfInputs )
 			{
+				ElementLocation el = elementLocations[i + threadIdx.x];
+				uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
+				uint8_t bucketIndex = el.bucket;
+
+				uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
 				outputValues[dstIndex] = inputValues[srcIndex];
 			}
 		}
 	}
-
 #else
 	__shared__ uint32_t psum[256];
 

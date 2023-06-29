@@ -85,6 +85,15 @@ void randomizeValues( splitmix64* rng, std::vector<T>* data )
 	}
 }
 
+template <class T>
+void sequentialValues( splitmix64* rng, std::vector<T>* data )
+{
+	for( int i = 0; i < data->size(); i++ )
+	{
+		( *data )[i] = static_cast<T>( i );
+	}
+}
+
 template <class KeyType>
 void testSortKeys( std::function<void( bool )> assertion )
 {
@@ -433,6 +442,141 @@ UTEST( OrochiRadixSort, bench )
 		}
 	}
 }
+
+template <class KeyType, class ValueType>
+void stableSortPairs( std::vector<KeyType>* keys, std::vector<KeyType>* values )
+{
+	int numberOfInputs = keys->size();
+	std::vector<std::pair<KeyType, ValueType>> pairs( numberOfInputs );
+	for( int i = 0; i < numberOfInputs; i++ )
+	{
+		pairs[i].first = ( *keys )[i];
+		pairs[i].second = ( *values )[i];
+	}
+
+	std::stable_sort( pairs.begin(), pairs.end(), []( std::pair<KeyType, ValueType> a, std::pair<KeyType, ValueType> b )
+					  { return a.first < b.first; } );
+
+	for( int i = 0; i < numberOfInputs; i++ )
+	{
+		( *keys )[i] = pairs[i].first;
+		( *values )[i] = pairs[i].second;
+	}
+}
+
+UTEST( OrochiRadixSort, benchKeyPair )
+{
+	int numberOfRun = 4;
+	int numberOfInputs = 160 * 1000 * 1000;
+	using KeyType = uint32_t;
+	using ValueType = uint32_t;
+
+	thrs::Buffer inputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
+	thrs::Buffer inputValueBuffer( sizeof( ValueType ) * numberOfInputs );
+	{
+		thrs::Buffer outputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
+		thrs::Buffer outputValueBuffer( sizeof( ValueType ) * numberOfInputs );
+
+		OrochiUtils oroutils;
+		splitmix64 rng;
+
+		Oro::RadixSort m_sort;
+		const auto s = m_sort.configure( device, oroutils, "../libs/Orochi/ParallelPrimitives/RadixSortKernels.h", "../libs/Orochi/" );
+		uint32_t* m_tempBuffer;
+		OrochiUtils::malloc( m_tempBuffer, s );
+
+		for( int i = 0; i < numberOfRun; i++ )
+		{
+			std::vector<KeyType> inputKeys( numberOfInputs );
+			randomizeValues( &rng, &inputKeys );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer.data(), inputKeys.data(), sizeof( KeyType ) * inputKeys.size(), stream );
+
+			std::vector<KeyType> inputValues( numberOfInputs );
+			sequentialValues( &rng, &inputValues );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputValueBuffer.data(), inputValues.data(), sizeof( ValueType ) * inputValues.size(), stream );
+
+			Oro::RadixSort::KeyValueSoA srcGpu{};
+			Oro::RadixSort::KeyValueSoA dstGpu{};
+
+			srcGpu.key = (uint32_t*)inputKeyBuffer.data();
+			srcGpu.value = (uint32_t*)inputValueBuffer.data();
+			dstGpu.key = (uint32_t*)outputKeyBuffer.data();
+			dstGpu.value = (uint32_t*)outputValueBuffer.data();
+
+			OroStopwatch oroStream( stream );
+			oroStream.start();
+
+			m_sort.sort( srcGpu, dstGpu, numberOfInputs, 0, 32, m_tempBuffer );
+
+			oroStream.stop();
+			float ms = oroStream.getMs();
+			printf( "m_sort.sort %f ms\n", ms );
+
+#if 1
+			stableSortPairs<KeyType, ValueType>( &inputKeys, &inputValues );
+
+			std::vector<KeyType> outputKeys( inputKeys.size() );
+			std::vector<ValueType> outputValues( inputValues.size() );
+			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)outputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
+			oroMemcpyDtoH( outputValues.data(), (oroDeviceptr)outputValueBuffer.data(), sizeof( ValueType ) * numberOfInputs );
+
+			for( int i = 0; i < numberOfInputs; i++ )
+			{
+				ASSERT_TRUE( outputKeys[i] == inputKeys[i] );
+				ASSERT_TRUE( outputValues[i] == inputValues[i] );
+			}
+#endif
+		}
+
+		OrochiUtils::free( m_tempBuffer );
+	}
+
+	{
+		splitmix64 rng;
+
+		thrs::RadixSort::Config config;
+		config.configureWithKeyPair<KeyType, ValueType>();
+		thrs::RadixSort radixsort( extraArgs, config );
+
+		thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
+
+		for( int i = 0; i < numberOfRun; i++ )
+		{
+			std::vector<KeyType> inputKeys( numberOfInputs );
+			randomizeValues( &rng, &inputKeys );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer.data(), inputKeys.data(), sizeof( KeyType ) * inputKeys.size(), stream );
+
+			std::vector<KeyType> inputValues( numberOfInputs );
+			sequentialValues( &rng, &inputValues );
+			oroMemcpyHtoDAsync( (oroDeviceptr)inputValueBuffer.data(), inputValues.data(), sizeof( ValueType ) * inputValues.size(), stream );
+
+			OroStopwatch oroStream( stream );
+			oroStream.start();
+
+			radixsort.sortPairs( inputKeyBuffer.data(), inputValueBuffer.data(), numberOfInputs, tmpBuffer.data(), 0, sizeof( KeyType ) * 8, stream );
+
+			oroStream.stop();
+			float ms = oroStream.getMs();
+			printf( "radixsort.sortPairs %f ms\n", ms );
+
+#if 1
+			stableSortPairs<KeyType, ValueType>( &inputKeys, &inputValues );
+
+			std::vector<KeyType> outputKeys( inputKeys.size() );
+			std::vector<ValueType> outputValues( inputValues.size() );
+			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
+			oroMemcpyDtoH( outputValues.data(), (oroDeviceptr)inputValueBuffer.data(), sizeof( ValueType ) * numberOfInputs );
+
+			for( int i = 0; i < numberOfInputs; i++ )
+			{
+				ASSERT_TRUE( outputKeys[i] == inputKeys[i] );
+				ASSERT_TRUE( outputValues[i] == inputValues[i] );
+			}
+#endif
+		}
+	}
+}
+
 
 UTEST( SortKeys, u32Large )
 {
