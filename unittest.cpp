@@ -17,7 +17,7 @@
 
 #define TEST_ITERATION 128
 #define TEST_MAX_ARRAY_SIZE 100000
-int deviceIdx = 0;
+int deviceIdx = 2;
 
 struct splitmix64
 {
@@ -135,6 +135,43 @@ UTEST( SortKeys, u32 )
 	testSortKeys<KeyType>( [&]( bool e )
 						   { ASSERT_TRUE( e ); } );
 }
+
+UTEST( SortKeys, extremeCase )
+{
+	using KeyType = uint32_t;
+	thrs::RadixSort::Config config;
+	config.configureWithKey<KeyType>();
+	thrs::RadixSort radixsort( extraArgs, config );
+
+	splitmix64 rng;
+	for( int i = 0; i < TEST_ITERATION; i++ )
+	{
+		int numberOfInputs = 1 + rng.next() % ( TEST_MAX_ARRAY_SIZE - 1 );
+		std::vector<KeyType> inputKeys( numberOfInputs );
+		inputKeys[rng.next() % inputKeys.size()] = 1;
+		inputKeys[rng.next() % inputKeys.size()] = 42;
+
+		thrs::Buffer inputKeyBuffer( sizeof( KeyType ) * numberOfInputs );
+		oroMemcpyHtoDAsync( (oroDeviceptr)inputKeyBuffer.data(), inputKeys.data(), sizeof( KeyType ) * inputKeys.size(), stream );
+
+		thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+
+		radixsort.sortKeys( inputKeyBuffer.data(), numberOfInputs, tmpBuffer.data(), 0, sizeof( KeyType ) * 8, stream );
+
+		oroStreamSynchronize( stream );
+
+		std::vector<KeyType> outputKeys( inputKeys.size() );
+		oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
+
+		std::sort( inputKeys.begin(), inputKeys.end() );
+
+		for( int i = 0; i < inputKeys.size(); i++ )
+		{
+			ASSERT_TRUE( inputKeys[i] == outputKeys[i] );
+		}
+	}
+}
+
 
 UTEST( SortKeys, u64 )
 {
