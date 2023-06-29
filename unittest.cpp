@@ -249,6 +249,26 @@ UTEST( StartBits, u64 )
 }
 
 // == Pairs ==
+template <class KeyType, class ValueType>
+void stableSortPairs( std::vector<KeyType>* keys, std::vector<ValueType>* values )
+{
+	int numberOfInputs = keys->size();
+	std::vector<std::pair<KeyType, ValueType>> pairs( numberOfInputs );
+	for( int i = 0; i < numberOfInputs; i++ )
+	{
+		pairs[i].first = ( *keys )[i];
+		pairs[i].second = ( *values )[i];
+	}
+
+	std::stable_sort( pairs.begin(), pairs.end(), []( std::pair<KeyType, ValueType> a, std::pair<KeyType, ValueType> b )
+					  { return a.first < b.first; } );
+
+	for( int i = 0; i < numberOfInputs; i++ )
+	{
+		( *keys )[i] = pairs[i].first;
+		( *values )[i] = pairs[i].second;
+	}
+}
 
 template <class KeyType, class ValueType>
 void testSortPairs( std::function<void(bool)> assertion )
@@ -287,18 +307,12 @@ void testSortPairs( std::function<void(bool)> assertion )
 		std::vector<ValueType> outputValues( inputValues.size() );
 		oroMemcpyDtoH( outputValues.data(), (oroDeviceptr)inputValueBuffer.data(), sizeof( ValueType ) * numberOfInputs );
 
-		std::vector<std::pair<KeyType, ValueType>> pairs( inputKeys.size() );
-		for( int i = 0; i < inputKeys.size(); i++ )
-		{
-			pairs[i].first = inputKeys[i];
-			pairs[i].second = inputValues[i];
-		}
-		std::stable_sort( pairs.begin(), pairs.end(), []( std::pair<KeyType, ValueType> a, std::pair<KeyType, ValueType> b )
-						  { return a.first < b.first; } );
+		stableSortPairs<KeyType, ValueType>( &inputKeys, &inputValues );
+
 		for( int i = 0; i < outputKeys.size(); i++ )
 		{
-			assertion( outputKeys[i] == pairs[i].first );
-			assertion( outputValues[i] == pairs[i].second );
+			assertion( outputKeys[i] == inputKeys[i] );
+			assertion( outputValues[i] == inputValues[i] );
 		}
 	}
 }
@@ -440,27 +454,6 @@ UTEST( OrochiRadixSort, bench )
 			}
 #endif
 		}
-	}
-}
-
-template <class KeyType, class ValueType>
-void stableSortPairs( std::vector<KeyType>* keys, std::vector<KeyType>* values )
-{
-	int numberOfInputs = keys->size();
-	std::vector<std::pair<KeyType, ValueType>> pairs( numberOfInputs );
-	for( int i = 0; i < numberOfInputs; i++ )
-	{
-		pairs[i].first = ( *keys )[i];
-		pairs[i].second = ( *values )[i];
-	}
-
-	std::stable_sort( pairs.begin(), pairs.end(), []( std::pair<KeyType, ValueType> a, std::pair<KeyType, ValueType> b )
-					  { return a.first < b.first; } );
-
-	for( int i = 0; i < numberOfInputs; i++ )
-	{
-		( *keys )[i] = pairs[i].first;
-		( *values )[i] = pairs[i].second;
 	}
 }
 
