@@ -542,7 +542,6 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 
             orortcDestroyProgram( &program );
 
-            orortcResult re;
 			oroError e = oroModuleLoadData( &m_module, m_shaderBinary.data() );
             THRS_ASSERT( e == oroSuccess );
         }
