@@ -162,6 +162,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		uint32_t bucket : 8;
 	};
 
+	__shared__ uint32_t pSum[256];
 	__shared__ uint32_t localPrefixSum[256];
 	__shared__ uint32_t counters[256];
 	__shared__ ElementLocation elementLocations[RADIX_SORT_BLOCK_SIZE];
@@ -173,6 +174,12 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 
 	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( localPrefixSum, 0 );
 	clearShared<256, REORDER_NUMBER_OF_THREADS_PER_BLOCK, uint32_t>( counters, 0 );
+
+	for( int i = 0; i < 256; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
+	{
+		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
+		pSum[i + threadIdx.x] = sums[counterIndex];
+	}
 
 	__syncthreads();
 
@@ -276,15 +283,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		{
 			atomicInc( &counters[bucketIndex], 0xFFFFFFFF );
 		}
-		__syncthreads();
 	}
-
-	for( int i = 0; i < 256; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
-	{
-		uint32_t counterIndex = ( i + threadIdx.x ) /* bucketIndex */ * numberOfBlocks + blockIndex;
-		localPrefixSum[i + threadIdx.x] = sums[counterIndex];
-	}
-	__syncthreads();
 
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
 	{
@@ -295,10 +294,11 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
 			uint8_t bucketIndex = el.bucket;
 
-			uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
+			uint32_t dstIndex = pSum[bucketIndex] + el.offsetGlobal;
 			outputKeys[dstIndex] = inputKeys[srcIndex];
 		}
 	}
+
 	if( keyPair )
 	{
 		for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
@@ -310,7 +310,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 				uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
 				uint8_t bucketIndex = el.bucket;
 
-				uint32_t dstIndex = localPrefixSum[bucketIndex] + el.offsetGlobal;
+				uint32_t dstIndex = pSum[bucketIndex] + el.offsetGlobal;
 				outputValues[dstIndex] = inputValues[srcIndex];
 			}
 		}
