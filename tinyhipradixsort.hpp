@@ -203,7 +203,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 	struct ElementLocation
 	{
 		uint32_t localSrcIndex : 12;
-		uint32_t offsetGlobal : 12;
+		uint32_t localOffset : 12;
 		uint32_t bucket : 8;
 	};
 
@@ -312,14 +312,15 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			{
 				offset += __popc( matchMasks[w][bucketIndex] );
 			}
-			uint32_t count = counters[bucketIndex];
-			uint32_t location = count + localPrefixSum[bucketIndex];
+
+			uint32_t localOffset = counters[bucketIndex] + offset;
+			uint32_t to = localOffset + localPrefixSum[bucketIndex];
 
 			ElementLocation el;
 			el.localSrcIndex = i + threadIdx.x;
-			el.offsetGlobal = count + offset;
+			el.localOffset = localOffset;
 			el.bucket = bucketIndex;
-			elementLocations[location + offset] = el;
+			elementLocations[to] = el;
 		}
 
 		__syncthreads();
@@ -339,7 +340,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
 			uint8_t bucketIndex = el.bucket;
 
-			uint32_t dstIndex = pSum[bucketIndex] + el.offsetGlobal;
+			uint32_t dstIndex = pSum[bucketIndex] + el.localOffset;
 			outputKeys[dstIndex] = inputKeys[srcIndex];
 		}
 	}
@@ -355,7 +356,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 				uint32_t srcIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + el.localSrcIndex;
 				uint8_t bucketIndex = el.bucket;
 
-				uint32_t dstIndex = pSum[bucketIndex] + el.offsetGlobal;
+				uint32_t dstIndex = pSum[bucketIndex] + el.localOffset;
 				outputValues[dstIndex] = inputValues[srcIndex];
 			}
 		}
