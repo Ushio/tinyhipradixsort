@@ -181,6 +181,14 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		pSum[i + threadIdx.x] = sums[counterIndex];
 	}
 
+	for( int w = 0; w < REORDER_NUMBER_OF_WARPS; w++ )
+	{
+		for( int i = 0; i < 256; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
+		{
+			matchMasks[w][i + threadIdx.x] = 0;
+		}
+	}
+
 	__syncthreads();
 
 	// count
@@ -230,21 +238,12 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		prefix += prefixSumExclusive<REORDER_NUMBER_OF_THREADS_PER_BLOCK>( prefix, &localPrefixSum[i] );
 	}
 
-	__syncthreads();
-
 	// reorder
 	for( int i = 0; i < RADIX_SORT_BLOCK_SIZE; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
 	{
 		uint32_t itemIndex = blockIndex * RADIX_SORT_BLOCK_SIZE + i + threadIdx.x;
 		uint32_t bucketIndex = elementBuckets[i + threadIdx.x];
-		
-		for( int w = 0; w < REORDER_NUMBER_OF_WARPS; w++ )
-		{
-			for( int i = 0; i < 256; i += REORDER_NUMBER_OF_THREADS_PER_BLOCK )
-			{
-				matchMasks[w][i + threadIdx.x] = 0;
-			}
-		}
+
 		__syncthreads();
 
 		int warp = threadIdx.x / 32;
@@ -257,11 +256,15 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 
 		__syncthreads();
 
+		bool flushMask = false;
+
 		if( itemIndex < numberOfInputs )
 		{
 			uint32_t matchMask = matchMasks[warp][bucketIndex];
 			uint32_t lowerMask = ( 1u << lane ) - 1;
 			uint32_t offset = __popc( matchMask & lowerMask );
+
+			flushMask = offset == 0;
 
 			for( int w = 0; w < warp; w++ )
 			{
@@ -283,6 +286,10 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		if( itemIndex < numberOfInputs )
 		{
 			atomicInc( &counters[bucketIndex], 0xFFFFFFFF );
+		}
+		if( flushMask )
+		{
+			matchMasks[warp][bucketIndex] = 0;
 		}
 	}
 
