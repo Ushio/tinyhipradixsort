@@ -115,3 +115,40 @@ project "main"
         targetname ("main")
         optimize "Full"
     filter{}
+
+project "helloworld"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "bin/"
+    systemversion "latest"
+    flags { "MultiProcessorCompile", "NoPCH" }
+
+    -- Src
+    files { "helloworld.cpp", "tinyhipradixsort.hpp" }
+
+    -- Orochi
+    includedirs { "libs/orochi" }
+    files { "libs/orochi/Orochi/Orochi.h" }
+    files { "libs/orochi/Orochi/Orochi.cpp" }
+    includedirs { "libs/orochi/contrib/hipew/include" }
+    files { "libs/orochi/contrib/hipew/src/hipew.cpp" }
+    includedirs { "libs/orochi/contrib/cuew/include" }
+    files { "libs/orochi/contrib/cuew/src/cuew.cpp" }
+    links { "version" }
+
+    -- UTF8
+    postbuildcommands { 
+        "{COPYFILE} ../libs/orochi/contrib/bin/win64/*.dll ../bin"
+    }
+
+    symbols "On"
+
+    filter {"Debug"}
+        runtime "Debug"
+        targetname ("helloworld_Debug")
+        optimize "Off"
+    filter {"Release"}
+        runtime "Release"
+        targetname ("helloworld")
+        optimize "Full"
+    filter{}
