@@ -121,9 +121,9 @@ int main()
 		// |
 		// blocks
 #if defined( KEY_PAIR )
-		thrs::Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
+		thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortPairs() );
 #else
-		thrs::Buffer counterPrefixSumBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
+		thrs::Buffer tmpBuffer( radixsort.getTemporaryBufferBytes( numberOfInputs ).getTemporaryBufferBytesForSortKeys() );
 #endif
 		for (;;)
 		{
@@ -155,9 +155,9 @@ int main()
 			oroStream.start();
 
 #if defined( KEY_PAIR )
-			radixsort.sortPairs( inputKeyBuffer->data(), inputValueBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_KEY_TYPE ) * 8, stream );
+			radixsort.sortPairs( inputKeyBuffer->data(), inputValueBuffer->data(), numberOfInputs, tmpBuffer.data(), 0, sizeof( RADIX_SORT_KEY_TYPE ) * 8, stream );
 #else
-			radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, counterPrefixSumBuffer.data(), 0, sizeof( RADIX_SORT_KEY_TYPE ) * 8, stream );
+			radixsort.sortKeys( inputKeyBuffer->data(), numberOfInputs, tmpBuffer.data(), 0, sizeof( RADIX_SORT_KEY_TYPE ) * 8, stream );
 #endif
 
 			oroStream.stop();
