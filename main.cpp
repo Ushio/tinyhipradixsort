@@ -1,10 +1,13 @@
 #include <stdint.h>
 #include <memory>
 #include <algorithm>
+#include <type_traits>
 #include "Orochi/OrochiUtils.h"
 
 #define THRS_KERNEL_FROM_FILE 1
 #include "tinyhipradixsort.hpp"
+
+#include "fpKey.hpp"
 
 #include <ppl.h>
 class Stopwatch
@@ -38,9 +41,21 @@ struct splitmix64
 
 // using RADIX_SORT_KEY_TYPE = uint64_t;
 using RADIX_SORT_KEY_TYPE = uint32_t;
+// using RADIX_SORT_KEY_TYPE = float;
 using RADIX_SORT_VALUE_TYPE = uint32_t;
 
 //#define KEY_PAIR 1
+
+template <
+	typename T,
+	typename std::enable_if<std::is_floating_point<T>::value, std::nullptr_t>::type = nullptr>
+void varidateItem( T v )
+{
+	THRS_ASSERT( isfinite( v ) );
+}
+void varidateItem( ... )
+{
+}
 
 int main()
 {
@@ -86,8 +101,8 @@ int main()
 		config.configureWithKeyPair<RADIX_SORT_KEY_TYPE, RADIX_SORT_VALUE_TYPE>();
 		thrs::RadixSort radixsort( extraArgs, config );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 8192 * 128 + 1 );
-		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 8192 );
-		 std::vector<RADIX_SORT_KEY_TYPE> inputs( 160 * 1000 * 1000 );
+		//  std::vector<RADIX_SORT_KEY_TYPE> inputs( 1 );
+		std::vector<RADIX_SORT_KEY_TYPE> inputs( 160 * 1000 * 1000 );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 );
 		//  std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024 * 1024 * 128 + 11 );
 		// std::vector<RADIX_SORT_KEY_TYPE> inputs( 1024llu * 1024 * 1024 * 2 + 100 );
@@ -114,7 +129,22 @@ int main()
 		{
 			for( int i = 0; i < inputs.size(); i++ )
 			{
-				inputs[i] = rng.next();
+				if ( std::is_same<RADIX_SORT_KEY_TYPE, float>::value )
+				{
+					uint32_t b = rng.next() & 0xFF7FFFFF;
+					inputs[i] = *(RADIX_SORT_KEY_TYPE*)&b;
+					varidateItem( inputs[i] );
+				}
+				else if ( std::is_same<RADIX_SORT_KEY_TYPE, double>::value )
+				{
+					uint64_t b = rng.next() & 0xFFEFFFFFFFFFFFFFllu;
+					inputs[i] = *(RADIX_SORT_KEY_TYPE*)&b;
+					varidateItem( inputs[i] );
+				}
+				else
+				{
+					inputs[i] = rng.next();
+				}
 				inputValues[i] = i;
 			}
 
@@ -162,7 +192,8 @@ int main()
 				THRS_ASSERT( outputValues[i] == pairs[i].second );
 			}
 #else
-			concurrency::parallel_radixsort( inputs.begin(), inputs.end() );
+			concurrency::parallel_radixsort( inputs.begin(), inputs.end(), []( RADIX_SORT_KEY_TYPE x ) { return getKeyBits( x ); } );
+
 			// std::sort( inputs.begin(), inputs.end() );
 			for( int i = 0; i < outputKeys.size(); i++ )
 			{

@@ -81,6 +81,31 @@ __device__ void clearShared( T* sMem, T value )
 	}
 }
 
+__device__ inline uint32_t getKeyBits( uint32_t x )
+{
+	return x;
+}
+__device__ inline uint64_t getKeyBits( uint64_t x )
+{
+	return x;
+}
+__device__ inline uint32_t getKeyBits( float x )
+{
+	if( x == 0.0f )
+		x = 0.0f;
+
+	uint32_t flip = uint32_t( __float_as_int( x ) >> 31 ) | 0x80000000;
+	return __float_as_uint( x ) ^ flip;
+}
+__device__ inline uint64_t getKeyBits( double x )
+{
+	if( x == 0.0 )
+		x = 0.0;
+
+	uint64_t flip = uint64_t( __double_as_longlong( x ) >> 63 ) | 0x8000000000000000llu;
+	return (uint64_t)__double_as_longlong( x ) ^ flip;
+}
+
 __device__ uint64_t g_iterator;
 
 extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
@@ -95,7 +120,7 @@ extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t num
 		if( itemIndex < numberOfInputs )
 		{
 			auto item = inputs[itemIndex];
-			uint32_t bits = ( item >> bitLocation ) & 0xFF;
+			uint32_t bits = ( getKeyBits( item ) >> bitLocation ) & 0xFF;
 			atomicInc( &localCounters[bits], 0xFFFFFFFF );
 		}
 	}
@@ -251,7 +276,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			for (int k = 0; k < 4; k++)
 			{
 				auto item = key4.xs[k];
-				uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+				uint32_t bucketIndex = ( getKeyBits( item ) >> bitLocation ) & 0xFF;
 				atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 				elementBuckets[i + threadIdx.x * 4 + k] = bucketIndex;
 			}
@@ -266,7 +291,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 			if( itemIndex < numberOfInputs )
 			{
 				auto item = inputKeys[itemIndex];
-				uint32_t bucketIndex = ( item >> bitLocation ) & 0xFF;
+				uint32_t bucketIndex = ( getKeyBits( item ) >> bitLocation ) & 0xFF;
 				atomicInc( &localPrefixSum[bucketIndex], 0xFFFFFFFF );
 
 				elementBuckets[i + threadIdx.x] = bucketIndex;
@@ -388,7 +413,7 @@ __device__ __forceinline__ void reorder( RADIX_SORT_KEY_TYPE* inputKeys, RADIX_S
 		if( itemIndex < numberOfInputs )
 		{
 			item = inputKeys[itemIndex];
-			bucketIndex = ( item >> bitLocation ) & 0xFF;
+			bucketIndex = ( getKeyBits( item ) >> bitLocation ) & 0xFF;
 		}
 		uint32_t location = 0xFFFFFFFF;
 		for( int j = 0; j < REORDER_NUMBER_OF_THREADS_PER_BLOCK; j++ )
@@ -585,8 +610,10 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 
     enum class KeyType
     {
-        U32,
-        U64
+		U32,
+		U64,
+		F32,
+		F64,
     };
     enum class ValueType
     {
@@ -599,8 +626,10 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 		switch( valueType )
 		{
 		case KeyType::U32:
+		case KeyType::F32:
 			return 4;
 		case KeyType::U64:
+		case KeyType::F64:
 			return 8;
 		}
 		THRS_ASSERT( 0 );
@@ -647,14 +676,21 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			{
 				static_assert( sizeof( KEY ) == 4 || sizeof( KEY ) == 8, "" );
 
-				switch( sizeof( KEY ) )
+				if( std::is_same<KEY, float>::value )
 				{
-				case 4:
+					keyType = KeyType::F32;
+				}
+				else if( std::is_same<KEY, double>::value )
+				{
+					keyType = KeyType::F64;
+				}
+				else if( sizeof( KEY ) == 4 )
+				{
 					keyType = KeyType::U32;
-					break;
-				case 8:
+				}
+				else if( sizeof( KEY ) == 8 )
+				{
 					keyType = KeyType::U64;
-					break;
 				}
 			}
 			template <class KEY, class VALUE>
@@ -685,10 +721,16 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
             switch( m_config.keyType )
             {
 			case KeyType::U32:
-				extraArgs.push_back( std::string( "-DRADIX_SORT_KEY_TYPE=uint32_t" ));
+				extraArgs.push_back( std::string( "-DRADIX_SORT_KEY_TYPE=uint32_t" ) );
 				break;
-            case KeyType::U64:
+			case KeyType::U64:
 				extraArgs.push_back( std::string( "-DRADIX_SORT_KEY_TYPE=uint64_t" ) );
+				break;
+			case KeyType::F32:
+				extraArgs.push_back( std::string( "-DRADIX_SORT_KEY_TYPE=float" ) );
+				break;
+			case KeyType::F64:
+				extraArgs.push_back( std::string( "-DRADIX_SORT_KEY_TYPE=double" ) );
 				break;
             }
 

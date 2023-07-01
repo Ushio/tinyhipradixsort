@@ -2,6 +2,8 @@
 #include <Orochi/Orochi.h>
 //#define THRS_KERNEL_FROM_FILE 1
 #include "tinyhipradixsort.hpp"
+#include "fpKey.hpp"
+
 #include <functional>
 #include <algorithm>
 
@@ -76,12 +78,40 @@ int main( int argc, const char* const argv[] )
 
 UTEST_STATE();
 
+UTEST( FPKeys, float )
+{
+	ASSERT_EQ( -0.0f < 0.0f, getKeyBits( -0.0f ) < getKeyBits( 0.0f ) );
+	ASSERT_EQ( FLT_MAX < std::numeric_limits<float>::infinity(), getKeyBits( FLT_MAX ) < getKeyBits( std::numeric_limits<float>::infinity() ) );
+
+	splitmix64 rng;
+	for( int i = 0; i < 100000000; i++ )
+	{
+		float a = ( rng.next() % 2 == 0 ? -1.0 : 1.0 ) * rng.next() * 0.1;
+		float b = ( rng.next() % 2 == 0 ? -1.0 : 1.0 ) * rng.next() * 0.1;
+
+		ASSERT_EQ( a < b, getKeyBits( a ) < getKeyBits( b ) );
+	}
+}
+
 template <class T>
 void randomizeValues( splitmix64* rng, std::vector<T>* data )
 {
 	for( int i = 0; i < data->size(); i++ )
 	{
-		(*data)[i] = static_cast<T>( rng->next() );
+		if( std::is_same<T, float>::value )
+		{
+			uint32_t b = rng->next() & 0xFF7FFFFF;
+			( *data )[i] = *(T*)&b;
+		}
+		else if( std::is_same<T, double>::value )
+		{
+			uint64_t b = rng->next() & 0xFFEFFFFFFFFFFFFFllu;
+			( *data )[i] = *(T*)&b;
+		}
+		else
+		{
+			( *data )[i] = static_cast<T>( rng->next() );
+		}
 	}
 }
 
@@ -135,6 +165,13 @@ UTEST( SortKeys, u32 )
 	testSortKeys<KeyType>( [&]( bool e )
 						   { ASSERT_TRUE( e ); } );
 }
+UTEST( SortKeys, f32 )
+{
+	using KeyType = float;
+	testSortKeys<KeyType>( [&]( bool e )
+						   { ASSERT_TRUE( e ); } );
+}
+
 
 UTEST( SortKeys, extremeCase )
 {
@@ -178,6 +215,12 @@ UTEST( SortKeys, u64 )
 	using KeyType = uint64_t;
 	testSortKeys<KeyType>( [&]( bool e )
 						{ ASSERT_TRUE( e ); } );
+}
+UTEST( SortKeys, f64 )
+{
+	using KeyType = double;
+	testSortKeys<KeyType>( [&]( bool e )
+						   { ASSERT_TRUE( e ); } );
 }
 
 
@@ -361,9 +404,23 @@ UTEST( SortPairs, K32V32 )
 	testSortPairs<KeyType, ValueType>( [&]( bool e )
 									   { ASSERT_TRUE( e ); } );
 }
+UTEST( SortPairs, KF32V32 )
+{
+	using KeyType = float;
+	using ValueType = uint32_t;
+	testSortPairs<KeyType, ValueType>( [&]( bool e )
+									   { ASSERT_TRUE( e ); } );
+}
 UTEST( SortPairs, K64V32 )
 {
 	using KeyType = uint64_t;
+	using ValueType = uint32_t;
+	testSortPairs<KeyType, ValueType>( [&]( bool e )
+									   { ASSERT_TRUE( e ); } );
+}
+UTEST( SortPairs, KF64V32 )
+{
+	using KeyType = double;
 	using ValueType = uint32_t;
 	testSortPairs<KeyType, ValueType>( [&]( bool e )
 									   { ASSERT_TRUE( e ); } );
