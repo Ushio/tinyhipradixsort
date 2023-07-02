@@ -125,10 +125,11 @@ void sequentialValues( splitmix64* rng, std::vector<T>* data )
 }
 
 template <class KeyType>
-void testSortKeys( std::function<void( bool )> assertion )
+void testSortKeys( std::function<void( bool )> assertion, thrs::SortOrder sortOrder = thrs::SortOrder::Ascending )
 {
 	thrs::RadixSort::Config config;
 	config.configureWithKey<KeyType>();
+	config.sortOrder = sortOrder;
 	thrs::RadixSort radixsort( extraArgs, config );
 
 	splitmix64 rng;
@@ -150,7 +151,14 @@ void testSortKeys( std::function<void( bool )> assertion )
 		std::vector<KeyType> outputKeys( inputKeys.size() );
 		oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
 
-		std::sort( inputKeys.begin(), inputKeys.end() );
+		if( sortOrder == thrs::SortOrder::Ascending )
+		{
+			std::sort( inputKeys.begin(), inputKeys.end() );
+		}
+		else
+		{
+			std::sort( inputKeys.begin(), inputKeys.end(), []( KeyType a, KeyType b ) { return a > b; } );
+		}
 
 		for( int i = 0; i < inputKeys.size(); i++ )
 		{
@@ -165,6 +173,13 @@ UTEST( SortKeys, u32 )
 	testSortKeys<KeyType>( [&]( bool e )
 						   { ASSERT_TRUE( e ); } );
 }
+UTEST( SortKeysDescending, u32 )
+{
+	using KeyType = uint32_t;
+	testSortKeys<KeyType>( [&]( bool e )
+						   { ASSERT_TRUE( e ); }, thrs::SortOrder::Descending );
+}
+
 UTEST( SortKeys, f32 )
 {
 	using KeyType = float;
@@ -222,6 +237,12 @@ UTEST( SortKeys, f64 )
 	testSortKeys<KeyType>( [&]( bool e )
 						   { ASSERT_TRUE( e ); } );
 }
+UTEST( SortKeysDescending, f64 )
+{
+	using KeyType = double;
+	testSortKeys<KeyType>( [&]( bool e )
+						   { ASSERT_TRUE( e ); }, thrs::SortOrder::Descending );
+}
 
 
 UTEST( StartBits, u64 )
@@ -229,10 +250,12 @@ UTEST( StartBits, u64 )
 	using KeyType = uint64_t;
 	using ValueType = uint32_t;
 
-	// sortKeys
+	// sortKeys ( Ascending, Descending )
+	for( auto sortOrder : { thrs::SortOrder::Ascending, thrs::SortOrder::Descending} )
 	{
 		thrs::RadixSort::Config config;
 		config.configureWithKey<KeyType>();
+		config.sortOrder = sortOrder;
 		thrs::RadixSort radixsort( extraArgs, config );
 
 		splitmix64 rng;
@@ -257,10 +280,13 @@ UTEST( StartBits, u64 )
 			std::vector<KeyType> outputKeys( inputKeys.size() );
 			oroMemcpyDtoH( outputKeys.data(), (oroDeviceptr)inputKeyBuffer.data(), sizeof( KeyType ) * numberOfInputs );
 
-			std::stable_sort( inputKeys.begin(), inputKeys.end(), [startBit]( KeyType a, KeyType b )
+			std::stable_sort( inputKeys.begin(), inputKeys.end(), [startBit, sortOrder]( KeyType a, KeyType b )
 			{ 
 				uint32_t bitA = ( a >> startBit ) & 0xFF;
 				uint32_t bitB = ( b >> startBit ) & 0xFF;
+				if( sortOrder == thrs::SortOrder::Descending )
+					return bitA > bitB;
+
 				return bitA < bitB;
 			} );
 

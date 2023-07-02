@@ -60,6 +60,13 @@ typedef unsigned char uint8_t;
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
 
+#if defined( DESCENDING_ORDER )
+#define ORDER_MASK_32 0xFFFFFFFF
+#define ORDER_MASK_64 0xFFFFFFFFFFFFFFFFllu
+#else
+#define ORDER_MASK_32 0
+#define ORDER_MASK_64 0llu
+#endif
 
 #if defined( CUDART_VERSION ) && CUDART_VERSION >= 9000
 	#define ITS 1
@@ -83,11 +90,11 @@ __device__ void clearShared( T* sMem, T value )
 
 __device__ inline uint32_t getKeyBits( uint32_t x )
 {
-	return x;
+	return x ^ ORDER_MASK_32;
 }
 __device__ inline uint64_t getKeyBits( uint64_t x )
 {
-	return x;
+	return x ^ ORDER_MASK_64;
 }
 __device__ inline uint32_t getKeyBits( float x )
 {
@@ -95,7 +102,7 @@ __device__ inline uint32_t getKeyBits( float x )
 		x = 0.0f;
 
 	uint32_t flip = uint32_t( __float_as_int( x ) >> 31 ) | 0x80000000;
-	return __float_as_uint( x ) ^ flip;
+	return __float_as_uint( x ) ^ flip ^ ORDER_MASK_32;
 }
 __device__ inline uint64_t getKeyBits( double x )
 {
@@ -103,7 +110,7 @@ __device__ inline uint64_t getKeyBits( double x )
 		x = 0.0;
 
 	uint64_t flip = uint64_t( __double_as_longlong( x ) >> 63 ) | 0x8000000000000000llu;
-	return (uint64_t)__double_as_longlong( x ) ^ flip;
+	return (uint64_t)__double_as_longlong( x ) ^ flip ^ ORDER_MASK_64;
 }
 
 __device__ uint64_t g_iterator;
@@ -141,7 +148,7 @@ extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t num
 }
 
 template <int NThreads>
-__device__ uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO )
+__device__ inline uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO )
 {
 	uint32_t value = sMemIO[threadIdx.x];
 
@@ -649,7 +656,11 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 		THRS_ASSERT( 0 );
 		return 0;
 	}
-
+	enum class SortOrder
+	{
+		Ascending,
+		Descending
+	};
 
     inline uint64_t div_round_up64( uint64_t val, uint64_t divisor )
 	{
@@ -670,6 +681,8 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 
             KeyType keyType = KeyType::U32;
             ValueType valueType = ValueType::U32;
+
+			SortOrder sortOrder = SortOrder::Ascending;
 
 			template <class KEY>
 			void configureWithKey()
@@ -750,6 +763,11 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			if( m_config.keyIs16byteAligned )
 			{
 				extraArgs.push_back( std::string( "-DKEY_IS_16BYTE_ALIGNED=1" ) );
+			}
+
+			if( m_config.sortOrder == SortOrder::Descending )
+			{
+				extraArgs.push_back( std::string( "-DDESCENDING_ORDER=1" ) );
 			}
 
 #if defined( THRS_KERNEL_FROM_FILE )
