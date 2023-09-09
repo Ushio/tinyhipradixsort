@@ -6,6 +6,7 @@
 #include <map>
 #include <inttypes.h>
 #include <Orochi/Orochi.h>
+//#include <Orochi/OrochiUtils.h>
 
 #define ARG_DEBINFO_NV "--generate-line-info"
 #define ARG_DEBINFO_AMD "-g"
@@ -16,12 +17,12 @@
 //#define THRS_KERNEL_FROM_FILE 1
 
 #define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 16384
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
-#define PSUM_NUMBER_OF_WARPS 32
+#define PSUM_NUMBER_OF_WARPS 16
 #define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
@@ -49,12 +50,12 @@ typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
 #define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 16384
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
-#define PSUM_NUMBER_OF_WARPS 32
+#define PSUM_NUMBER_OF_WARPS 16
 #define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
@@ -180,26 +181,37 @@ __device__ inline uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO
 
 extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs )
 {
-	__shared__ uint32_t localPrefixSum[RADIX_SORT_PREFIX_SCAN_BLOCK];
 	__shared__ uint32_t gp;
+	__shared__ uint32_t smem[PSUM_NUMBER_OF_THREADS_PER_BLOCK];
 
 	uint32_t blockIndex = blockIdx.x;
-	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += PSUM_NUMBER_OF_THREADS_PER_BLOCK )
-	{
-		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
-		localPrefixSum[i + threadIdx.x] = itemIndex < numberOfInputs ? inout[itemIndex] : 0;
-	}
 
 	__syncthreads();
 
-	uint32_t prefix = 0;
+	uint32_t s = 0;
 	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += PSUM_NUMBER_OF_THREADS_PER_BLOCK )
 	{
-		prefix += prefixSumExclusive<PSUM_NUMBER_OF_THREADS_PER_BLOCK>( prefix, &localPrefixSum[i] );
+		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
+		s += itemIndex < numberOfInputs ? inout[itemIndex] : 0;
+	}
+
+	smem[threadIdx.x] = s;
+
+	__syncthreads();
+
+	for( int i = 1; i < PSUM_NUMBER_OF_THREADS_PER_BLOCK; i <<= 1 )
+	{
+		uint32_t a = smem[threadIdx.x];
+		uint32_t b = smem[threadIdx.x ^ i];
+		__syncthreads();
+		smem[threadIdx.x] = a + b;
+		__syncthreads();
 	}
 
 	if( threadIdx.x == 0 )
 	{
+		uint32_t prefix = smem[0];
+
 		uint64_t expected;
 		uint64_t cur = g_iterator;
 		uint32_t globalPrefix = cur & 0xFFFFFFFF;
@@ -214,18 +226,26 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 
 		gp = globalPrefix;
 	}
+
 	__syncthreads();
 
 	uint32_t globalPrefix = gp;
-	__syncthreads();
 
 	for( int i = 0; i < RADIX_SORT_PREFIX_SCAN_BLOCK; i += PSUM_NUMBER_OF_THREADS_PER_BLOCK )
 	{
 		uint32_t itemIndex = blockIndex * RADIX_SORT_PREFIX_SCAN_BLOCK + i + threadIdx.x;
+		smem[threadIdx.x] = itemIndex < numberOfInputs ? inout[itemIndex] : 0;
+
+		__syncthreads();
+
+		globalPrefix += prefixSumExclusive<PSUM_NUMBER_OF_THREADS_PER_BLOCK>( globalPrefix, smem );
+
 		if( itemIndex < numberOfInputs )
 		{
-			inout[itemIndex] = globalPrefix + localPrefixSum[i + threadIdx.x];
+			inout[itemIndex] = smem[threadIdx.x];
 		}
+
+		__syncthreads();
 	}
 }
 
@@ -859,10 +879,19 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 				}
 				// Prefix Sum
 				{
+					//OroStopwatch oroStream( stream );
+					//oroStream.start();
+
 					ShaderArgument args;
 					args.add( pSumBuffer );
 					args.add( numberOfBlocks * 256 );
 					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, PSUM_NUMBER_OF_THREADS_PER_BLOCK, 1, 1, stream );
+				
+					//oroStream.stop();
+					//float ms = oroStream.getMs();
+					//oroStreamSynchronize( stream );
+
+					//printf( "psum %f ms\n", ms );
 				}
 				// reorder
 				{
