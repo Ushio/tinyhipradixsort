@@ -83,8 +83,6 @@ __device__ inline uint64_t getKeyBits( double x )
 	return (uint64_t)__double_as_longlong( x ) ^ flip ^ ORDER_MASK_64;
 }
 
-__device__ uint64_t g_iterator;
-
 extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
@@ -112,9 +110,6 @@ extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t num
 		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
 		counters[counterIndex] = localCounters[bucketIndex];
 	}
-
-	if( blockIdx.x == 0 && threadIdx.x == 0 )
-		g_iterator = 0;
 }
 
 template <int NThreads>
@@ -179,7 +174,6 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 
 	if( threadIdx.x == 0 )
 	{
-#if 1
 		uint32_t aggregate = smem[0];
 		partitions[blockIndex].aggregate = aggregate;
 
@@ -217,23 +211,6 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 		atomicExch( &partitions[blockIndex].flag, PARTITIOIN_FLAG_P );
 
 		gp = p;
-#else
-		uint32_t prefix = smem[0];
-
-		uint64_t expected;
-		uint64_t cur = g_iterator;
-		uint32_t globalPrefix = cur & 0xFFFFFFFF;
-		do
-		{
-			expected = (uint64_t)globalPrefix + ( (uint64_t)( blockIndex ) << 32 );
-			uint64_t newValue = (uint64_t)globalPrefix + prefix | ( (uint64_t)( blockIndex + 1 ) << 32 );
-			cur = atomicCAS( &g_iterator, expected, newValue );
-			globalPrefix = cur & 0xFFFFFFFF;
-
-		} while( cur != expected );
-
-		gp = globalPrefix;
-#endif
 	}
 
 	__syncthreads();

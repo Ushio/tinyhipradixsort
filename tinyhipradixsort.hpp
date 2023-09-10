@@ -17,12 +17,12 @@
 //#define THRS_KERNEL_FROM_FILE 1
 
 #define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
-#define PSUM_NUMBER_OF_WARPS 8 
+#define PSUM_NUMBER_OF_WARPS 4
 #define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
@@ -58,16 +58,31 @@ typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
 #define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 16384
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 4096
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
-#define PSUM_NUMBER_OF_WARPS 16
+#define PSUM_NUMBER_OF_WARPS 4
 #define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
+
+struct PartitionID
+{
+	uint32_t flag;
+	uint32_t aggregate;
+	uint32_t incPrefix;
+	uint32_t _pad;
+};
+
+enum
+{
+	PARTITIOIN_FLAG_X = 0,
+	PARTITIOIN_FLAG_A,
+	PARTITIOIN_FLAG_P,
+};
 
 #if defined( DESCENDING_ORDER )
 #define ORDER_MASK_32 0xFFFFFFFF
@@ -122,8 +137,6 @@ __device__ inline uint64_t getKeyBits( double x )
 	return (uint64_t)__double_as_longlong( x ) ^ flip ^ ORDER_MASK_64;
 }
 
-__device__ uint64_t g_iterator;
-
 extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t numberOfInputs, uint32_t* counters, uint32_t bitLocation )
 {
 	__shared__ uint32_t localCounters[256];
@@ -151,9 +164,6 @@ extern "C" __global__ void blockCount( RADIX_SORT_KEY_TYPE* inputs, uint32_t num
 		uint32_t counterIndex = bucketIndex * numberOfBlocks + blockIndex;
 		counters[counterIndex] = localCounters[bucketIndex];
 	}
-
-	if( blockIdx.x == 0 && threadIdx.x == 0 )
-		g_iterator = 0;
 }
 
 template <int NThreads>
@@ -187,12 +197,12 @@ __device__ inline uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO
 	return sum;
 }
 
-extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs )
+extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs, PartitionID* partitions )
 {
 	__shared__ uint32_t gp;
 	__shared__ uint32_t smem[PSUM_NUMBER_OF_THREADS_PER_BLOCK];
 
-	uint32_t blockIndex = blockIdx.x;
+	int blockIndex = blockIdx.x;
 
 	__syncthreads();
 
@@ -218,21 +228,43 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 
 	if( threadIdx.x == 0 )
 	{
-		uint32_t prefix = smem[0];
+		uint32_t aggregate = smem[0];
+		partitions[blockIndex].aggregate = aggregate;
 
-		uint64_t expected;
-		uint64_t cur = g_iterator;
-		uint32_t globalPrefix = cur & 0xFFFFFFFF;
-		do
+		__threadfence();
+
+		atomicExch( &partitions[blockIndex].flag, PARTITIOIN_FLAG_A );
+		
+		uint32_t p = 0;
+		for( int i = blockIndex - 1 ; 0 <= i ; i-- )
 		{
-			expected = (uint64_t)globalPrefix + ( (uint64_t)( blockIndex ) << 32 );
-			uint64_t newValue = (uint64_t)globalPrefix + prefix | ( (uint64_t)( blockIndex + 1 ) << 32 );
-			cur = atomicCAS( &g_iterator, expected, newValue );
-			globalPrefix = cur & 0xFFFFFFFF;
+			uint32_t flag;
+			do
+			{
+				flag = atomicAdd( &partitions[i].flag, 0 );
+			}
+			while( flag == PARTITIOIN_FLAG_X );
 
-		} while( cur != expected );
+			__threadfence();
 
-		gp = globalPrefix;
+			if( flag == PARTITIOIN_FLAG_A )
+			{
+				p += partitions[i].aggregate;
+			}
+			else
+			{
+				p += partitions[i].incPrefix;
+				break;
+			}
+		}
+
+		partitions[blockIndex].incPrefix = p + aggregate;
+
+		__threadfence();
+
+		atomicExch( &partitions[blockIndex].flag, PARTITIOIN_FLAG_P );
+
+		gp = p;
 	}
 
 	__syncthreads();
@@ -814,28 +846,33 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 		struct TemporaryBufferDef
 		{
 			uint64_t pSumBuffer;
+			uint64_t dlbBuffer;
 			uint64_t keyOutBuffer;
 			uint64_t valueOutBuffer;
 
 			uint64_t getTemporaryBufferBytesForSortKeys() const
 			{
-				return pSumBuffer + keyOutBuffer;
+				return pSumBuffer + dlbBuffer + keyOutBuffer;
 			}
 			uint64_t getTemporaryBufferBytesForSortPairs() const
 			{
-				return pSumBuffer + keyOutBuffer + valueOutBuffer;
+				return pSumBuffer + dlbBuffer + keyOutBuffer + valueOutBuffer;
 			}
 			void* getPSumBuffer( void* p ) const
 			{
 				return p;
 			}
-			void* getOutputKeyBuffer( void* p ) const
+			void* getDLBBuffer( void* p ) const
 			{
 				return (void*)( (uint8_t*)p + pSumBuffer );
 			}
+			void* getOutputKeyBuffer( void* p ) const
+			{
+				return (void*)( (uint8_t*)p + pSumBuffer + dlbBuffer );
+			}
 			void* getOutputValueBuffer( void* p ) const
 			{
-				return (void*)( (uint8_t*)p + pSumBuffer + keyOutBuffer );
+				return (void*)( (uint8_t*)p + pSumBuffer + dlbBuffer + keyOutBuffer );
 			}
 		};
 		TemporaryBufferDef getTemporaryBufferBytes( uint32_t numberOfMaxInputs ) const
@@ -845,6 +882,8 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			TemporaryBufferDef def = {};
 			uint64_t numberOfBlocks = div_round_up64( numberOfMaxInputs, RADIX_SORT_BLOCK_SIZE );
 			def.pSumBuffer = next_multiple64( sizeof( uint32_t ) * 256 * numberOfBlocks, alignment );
+			int nPartitions = div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK );
+			def.dlbBuffer = next_multiple64( sizeof( PartitionID ) * nPartitions, alignment );
 			def.keyOutBuffer = next_multiple64( bytesOf( m_config.keyType ) * numberOfMaxInputs, alignment );
 			def.valueOutBuffer = next_multiple64( bytesOf( m_config.valueType ) * numberOfMaxInputs, alignment );
 			return def;
@@ -866,6 +905,7 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 			// Buffers
 			TemporaryBufferDef def = getTemporaryBufferBytes( numberOfInputs );
 			void* pSumBuffer = def.getPSumBuffer( temporaryBuffer );
+			void* dlbBuffer = def.getDLBBuffer( temporaryBuffer );
 			void* outputKeyBuffer = def.getOutputKeyBuffer( temporaryBuffer );
 			void* outputValueBuffer = def.getOutputValueBuffer( temporaryBuffer );
 
@@ -889,25 +929,19 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 				{
 					//OroStopwatch oroStream( stream );
 					//oroStream.start();
-
 					int nPartitions = div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK );
-					static PartitionID* partitions;
-					if( partitions == 0 )
-					{
-						oroMalloc( (oroDeviceptr*)&partitions, sizeof( PartitionID ) * nPartitions );
-					}
-					oroMemsetD8Async( (oroDeviceptr)partitions, 0, sizeof( PartitionID ) * nPartitions, stream );
-
+					oroMemsetD8Async( (oroDeviceptr)dlbBuffer, 0, sizeof( PartitionID ) * nPartitions, stream );
+					
 					ShaderArgument args;
 					args.add( pSumBuffer );
 					args.add( numberOfBlocks * 256 );
-					args.add( partitions );
+					args.add( dlbBuffer );
 					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, PSUM_NUMBER_OF_THREADS_PER_BLOCK, 1, 1, stream );
 				
 					//oroStream.stop();
 					//float ms = oroStream.getMs();
 					//oroStreamSynchronize( stream );
-
+					//
 					//printf( "psum %f ms\n", ms );
 				}
 				// reorder
