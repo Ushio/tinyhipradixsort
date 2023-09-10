@@ -4,16 +4,31 @@ typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 
 #define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 16384
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
-#define PSUM_NUMBER_OF_WARPS 16
+#define PSUM_NUMBER_OF_WARPS 8
 #define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
+
+struct PartitionID
+{
+	uint32_t flag;
+	uint32_t aggregate;
+	uint32_t incPrefix;
+	uint32_t _pad;
+};
+
+enum
+{
+	PARTITIOIN_FLAG_X = 0,
+	PARTITIOIN_FLAG_A,
+	PARTITIOIN_FLAG_P,
+};
 
 #if defined( DESCENDING_ORDER )
 #define ORDER_MASK_32 0xFFFFFFFF
@@ -133,12 +148,12 @@ __device__ inline uint32_t prefixSumExclusive( uint32_t prefix, uint32_t* sMemIO
 	return sum;
 }
 
-extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs )
+extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t numberOfInputs, PartitionID* partitions )
 {
 	__shared__ uint32_t gp;
 	__shared__ uint32_t smem[PSUM_NUMBER_OF_THREADS_PER_BLOCK];
 
-	uint32_t blockIndex = blockIdx.x;
+	int blockIndex = blockIdx.x;
 
 	__syncthreads();
 
@@ -164,6 +179,45 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 
 	if( threadIdx.x == 0 )
 	{
+#if 1
+		uint32_t aggregate = smem[0];
+		partitions[blockIndex].aggregate = aggregate;
+
+		__threadfence();
+
+		atomicExch( &partitions[blockIndex].flag, PARTITIOIN_FLAG_A );
+		
+		uint32_t p = 0;
+		for( int i = blockIndex - 1 ; 0 <= i ; i-- )
+		{
+			uint32_t flag;
+			do
+			{
+				flag = atomicAdd( &partitions[i].flag, 0 );
+			}
+			while( flag == PARTITIOIN_FLAG_X );
+
+			__threadfence();
+
+			if( flag == PARTITIOIN_FLAG_A )
+			{
+				p += partitions[i].aggregate;
+			}
+			else
+			{
+				p += partitions[i].incPrefix;
+				break;
+			}
+		}
+
+		partitions[blockIndex].incPrefix = p + aggregate;
+
+		__threadfence();
+
+		atomicExch( &partitions[blockIndex].flag, PARTITIOIN_FLAG_P );
+
+		gp = p;
+#else
 		uint32_t prefix = smem[0];
 
 		uint64_t expected;
@@ -179,6 +233,7 @@ extern "C" __global__ void prefixSumExclusiveInplace( uint32_t* inout, uint32_t 
 		} while( cur != expected );
 
 		gp = globalPrefix;
+#endif
 	}
 
 	__syncthreads();

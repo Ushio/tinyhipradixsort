@@ -17,16 +17,24 @@
 //#define THRS_KERNEL_FROM_FILE 1
 
 #define RADIX_SORT_BLOCK_SIZE 2048
-#define RADIX_SORT_PREFIX_SCAN_BLOCK 16384
+#define RADIX_SORT_PREFIX_SCAN_BLOCK 8192
 
 #define BLOCK_COUNT_NUMBER_OF_WARPS 8
 #define BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK ( 32 * BLOCK_COUNT_NUMBER_OF_WARPS )
 
-#define PSUM_NUMBER_OF_WARPS 16
+#define PSUM_NUMBER_OF_WARPS 8 
 #define PSUM_NUMBER_OF_THREADS_PER_BLOCK ( 32 * PSUM_NUMBER_OF_WARPS )
 
 #define REORDER_NUMBER_OF_WARPS 8
 #define REORDER_NUMBER_OF_THREADS_PER_BLOCK ( 32 * REORDER_NUMBER_OF_WARPS )
+
+struct PartitionID
+{
+	uint32_t flag;
+	uint32_t aggregate;
+	uint32_t incPrefix;
+	uint32_t _pad;
+};
 
 // some checks for simplicity
 static_assert( BLOCK_COUNT_NUMBER_OF_THREADS_PER_BLOCK <= 256, "please check counters, etc" );
@@ -882,9 +890,18 @@ extern "C" __global__ void reorderKeyPair( RADIX_SORT_KEY_TYPE* inputKeys, RADIX
 					//OroStopwatch oroStream( stream );
 					//oroStream.start();
 
+					int nPartitions = div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK );
+					static PartitionID* partitions;
+					if( partitions == 0 )
+					{
+						oroMalloc( (oroDeviceptr*)&partitions, sizeof( PartitionID ) * nPartitions );
+					}
+					oroMemsetD8Async( (oroDeviceptr)partitions, 0, sizeof( PartitionID ) * nPartitions, stream );
+
 					ShaderArgument args;
 					args.add( pSumBuffer );
 					args.add( numberOfBlocks * 256 );
+					args.add( partitions );
 					m_shader->launch( "prefixSumExclusiveInplace", args, div_round_up64( numberOfBlocks * 256, RADIX_SORT_PREFIX_SCAN_BLOCK ), 1, 1, PSUM_NUMBER_OF_THREADS_PER_BLOCK, 1, 1, stream );
 				
 					//oroStream.stop();
